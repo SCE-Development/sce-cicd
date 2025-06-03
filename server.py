@@ -1,4 +1,5 @@
 import logging
+import subprocess
 import threading
 import time
 
@@ -61,6 +62,32 @@ def poll_github():
                 
             if latest_commits[repo_name] is not None and new_sha != latest_commits[repo_name]:
                 logger.info(f"new commit detected in {repo_name} {branch}: {new_sha}")
+                try:
+                    # pull the latest changes
+                    logger.info(f"Pulling latest changes for {repo_name}")
+                    pull_result = subprocess.run(
+                        ["git", "pull", "origin", branch],
+                        cwd=repo_name,
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                    logger.info(f"Git pull successful for {repo_name}: {pull_result.stdout}")
+
+                    # then rebuild and restart containers
+                    logger.info(f"Rebuilding containers for {repo_name}")
+                    subprocess.run(
+                        ["docker", "compose", "up", "--build", "-d"],
+                        cwd=repo_name,
+                        check=True,
+                        capture_output=True,
+                        text=True
+                    )
+                    logger.info(f"Successfully rebuilt and restarted containers for {repo_name}")
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"Failed to update or rebuild {repo_name}: {e.stderr}")
+                except Exception as e:
+                    logger.error(f"Unexpected error while updating or rebuilding {repo_name}: {str(e)}")
             
             latest_commits[repo_name] = new_sha
             
