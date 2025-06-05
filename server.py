@@ -34,10 +34,10 @@ async def github_webhook(request: Request):
     
     # check if this is a push event to cicd-testing branch
     if request.headers.get("X-GitHub-Event") == "push":
-        ref = payload.get("ref", "")
+        ref = payload.get("ref")
         branch = ref.split("/")[-1]
         if branch == "cicd-testing":
-            repo_name = payload.get("repository", {}).get("name")
+            repo_name = payload.get("repository").get("name")
             logger.info(f"Push to {branch} detected for {repo_name}")
             update_repo(repo_name, branch)
     
