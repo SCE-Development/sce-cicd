@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  cicd-server:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # this makes a "tunnel" that allows commands to be run by the docker daemon
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped 
