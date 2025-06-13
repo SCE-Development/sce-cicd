@@ -1,5 +1,8 @@
 import json
 import logging
+import os
+import subprocess
+import threading
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -25,7 +28,25 @@ logger = logging.getLogger(__name__)
 
 def update_repo(repo_name: str, branch: str):
     logger.info(f"updating {repo_name} to {branch}")
-    logger.info("hi ts is working")
+    try:
+        repo_path = os.path.join(os.path.expanduser('~'), repo_name)
+        logger.info(f"Changing to directory: {repo_path}")
+        
+        os.chdir(repo_path)
+        
+        git_result = subprocess.run(['git', 'pull'], capture_output=True, text=True)
+        logger.info(f"Git pull output: {git_result.stdout}")
+        if git_result.stderr:
+            logger.error(f"Git pull error: {git_result.stderr}")
+        
+        docker_result = subprocess.run(['docker-compose', 'up', '--build', '-d'], capture_output=True, text=True)
+        logger.info(f"Docker compose output: {docker_result.stdout}")
+        if docker_result.stderr:
+            logger.error(f"Docker compose error: {docker_result.stderr}")
+            
+    except Exception as e:
+        logger.error(f"Error updating repository: {str(e)}")
+        logger.error(f"Current working directory: {os.getcwd()}")
 
 @app.post("/webhook")
 async def github_webhook(request: Request):
@@ -39,9 +60,11 @@ async def github_webhook(request: Request):
         if branch == "cicd-testing":
             repo_name = payload.get("repository").get("name")
             logger.info(f"Push to {branch} detected for {repo_name}")
-            update_repo(repo_name, branch)
+            # update the repo
+            thread = threading.Thread(target=update_repo, args=(repo_name, branch))
+            thread.start()
     
-    return {"status": "yay"}
+    return {"status": "webhook received"}
 
 @app.get("/")
 def read_root():
