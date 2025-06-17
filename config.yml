@@ -1,0 +1,5 @@
+base_path: /home/sce
+
+repos:
+  - name: Clark
+    branch: cicd-testing

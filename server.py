@@ -5,6 +5,7 @@ import subprocess
 import threading
 
 import uvicorn
+import yaml
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -26,10 +27,16 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+with open("config.yaml") as f:
+    config = yaml.safe_load(f)
+
+BASE_PATH = config["base_path"]
+WATCHED_REPOS = {(repo["name"], repo["branch"]) for repo in config["repos"]}
+
 def update_repo(repo_name: str, branch: str):
     logger.info(f"updating {repo_name} to {branch}")
     try:
-        repo_path = os.path.join(os.path.expanduser('~'), repo_name)
+        repo_path = os.path.join(BASE_PATH, repo_name)
         logger.info(f"Changing to directory: {repo_path}")
         
         os.chdir(repo_path)
@@ -48,17 +55,21 @@ def update_repo(repo_name: str, branch: str):
         logger.error(f"Error updating repository: {str(e)}")
         logger.error(f"Current working directory: {os.getcwd()}")
 
+# smee --url https://smee.io/PwN1nwSMs3vL1Vr5 --target http://127.0.0.1:3000/webhook
+
 @app.post("/webhook")
 async def github_webhook(request: Request):
     payload_body = await request.body()
     payload = json.loads(payload_body)
     
-    # check if this is a push event to cicd-testing branch
+    # check if this is a push event
     if request.headers.get("X-GitHub-Event") == "push":
         ref = payload.get("ref")
         branch = ref.split("/")[-1]
-        if branch == "cicd-testing":
-            repo_name = payload.get("repository").get("name")
+        repo_name = payload.get("repository").get("name")
+        
+        # O(1) lookup lol
+        if (repo_name, branch) in WATCHED_REPOS:
             logger.info(f"Push to {branch} detected for {repo_name}")
             # update the repo
             thread = threading.Thread(target=update_repo, args=(repo_name, branch))
@@ -71,4 +82,4 @@ def read_root():
     return {"message": "SCE CICD Server"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, port=8000)
+    uvicorn.run(app, port=3000)
