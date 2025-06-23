@@ -1,5 +1,5 @@
 base_path: /home/sce
 
 repos:
-  - name: Clark
-    branch: cicd-testing
+  - name: git-workshop
+    branch: main

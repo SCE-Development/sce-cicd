@@ -42,15 +42,15 @@ def update_repo(repo_name: str, branch: str):
         
         os.chdir(repo_path)
         
-        git_result = subprocess.run(['git', 'pull'], capture_output=True, text=True)
+        git_result = subprocess.run(['git', 'pull', 'origin', branch], capture_output=True, text=True)
         logger.info(f"Git pull output: {git_result.stdout}")
         if git_result.stderr:
-            logger.error(f"Git pull error: {git_result.stderr}")
+            logger.info(f"Git pull status: {git_result.stderr}")
         
         docker_result = subprocess.run(['docker-compose', 'up', '--build', '-d'], capture_output=True, text=True)
         logger.info(f"Docker compose output: {docker_result.stdout}")
         if docker_result.stderr:
-            logger.error(f"Docker compose error: {docker_result.stderr}")
+            logger.info(f"Docker compose status: {docker_result.stderr}")
             
     except Exception as e:
         logger.error(f"Error updating repository: {str(e)}")
