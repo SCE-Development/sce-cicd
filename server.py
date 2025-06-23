@@ -3,6 +3,7 @@ import logging
 import os
 import subprocess
 import threading
+from pathlib import Path
 
 import uvicorn
 import yaml
@@ -27,16 +28,16 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-with open("config.yaml") as f:
+with open("config.yml") as f:
     config = yaml.safe_load(f)
 
-BASE_PATH = config["base_path"]
+BASE_PATH = Path(config["base_path"])
 WATCHED_REPOS = {(repo["name"], repo["branch"]) for repo in config["repos"]}
 
 def update_repo(repo_name: str, branch: str):
     logger.info(f"updating {repo_name} to {branch}")
     try:
-        repo_path = os.path.join(BASE_PATH, repo_name)
+        repo_path = BASE_PATH / repo_name
         logger.info(f"Changing to directory: {repo_path}")
         
         os.chdir(repo_path)
