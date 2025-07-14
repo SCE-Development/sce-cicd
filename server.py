@@ -42,12 +42,12 @@ def update_repo(repo_name: str, branch: str):
         
         os.chdir(repo_path)
         
-        git_result = subprocess.run(['git', 'pull', 'origin', branch], capture_output=True, text=True)
+        git_result = subprocess.run(['git', 'pull', 'origin', branch])
         logger.info(f"Git pull output: {git_result.stdout}")
         if git_result.stderr:
             logger.info(f"Git pull status: {git_result.stderr}")
         
-        docker_result = subprocess.run(['docker-compose', 'up', '--build', '-d'], capture_output=True, text=True)
+        docker_result = subprocess.run(['docker-compose', 'up', '-d'])
         logger.info(f"Docker compose output: {docker_result.stdout}")
         if docker_result.stderr:
             logger.info(f"Docker compose status: {docker_result.stderr}")
@@ -56,12 +56,11 @@ def update_repo(repo_name: str, branch: str):
         logger.error(f"Error updating repository: {str(e)}")
         logger.error(f"Current working directory: {os.getcwd()}")
 
-# smee --url https://smee.io/PwN1nwSMs3vL1Vr5 --target http://127.0.0.1:3000/webhook
-
 @app.post("/webhook")
 async def github_webhook(request: Request):
     payload_body = await request.body()
     payload = json.loads(payload_body)
+    print(payload)
     
     # check if this is a push event
     if request.headers.get("X-GitHub-Event") == "push":
@@ -69,7 +68,6 @@ async def github_webhook(request: Request):
         branch = ref.split("/")[-1]
         repo_name = payload.get("repository").get("name")
         
-        # O(1) lookup lol
         if (repo_name, branch) in WATCHED_REPOS:
             logger.info(f"Push to {branch} detected for {repo_name}")
             # update the repo
@@ -82,5 +80,19 @@ async def github_webhook(request: Request):
 def read_root():
     return {"message": "SCE CICD Server"}
 
+def start_smee():
+    try:
+        result = subprocess.run(['tmux', 'has-session', '-t', 'smee'], capture_output=True)
+        if result.returncode != 0:
+            subprocess.run(['tmux', 'new-session', '-d', '-s', 'smee'])
+        
+        # sends the smee command to the tmux session named smee
+        smee_cmd = f"smee --url {os.getenv('SMEE_URL')} --target http://127.0.0.1:3000/webhook"
+        subprocess.run(['tmux', 'send-keys', '-t', 'smee', smee_cmd, 'Enter'])
+        logger.info("Smee started in tmux session 'smee'")
+    except Exception as e:
+        logger.error(f"Error starting smee: {e}")
+
 if __name__ == "__main__":
+    start_smee()
     uvicorn.run(app, port=3000)
