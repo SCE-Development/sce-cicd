@@ -47,10 +47,10 @@ def update_repo(repo_name: str, branch: str):
         if git_result.stderr:
             logger.info(f"Git pull status: {git_result.stderr}")
         
-        docker_result = subprocess.run(['docker-compose', 'up', '-d'])
+        docker_result = subprocess.run(['docker-compose', 'up', '--build', '-d'])
         logger.info(f"Docker compose output: {docker_result.stdout}")
-        if docker_result.stderr:
-            logger.info(f"Docker compose status: {docker_result.stderr}")
+        if docker_result.returncode != 0:
+            logger.error(f"Docker compose failed with status: {docker_result.returncode}")
             
     except Exception as e:
         logger.error(f"Error updating repository: {str(e)}")
