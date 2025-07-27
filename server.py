@@ -11,6 +11,7 @@ import uvicorn
 import yaml
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+import requests
 
 dotenv.load_dotenv()
 
@@ -77,6 +78,18 @@ def update_repo(repo_config: RepoToWatch):
             logger.error(
                 f"Docker compose exited with nonzero status: {docker_result.returncode}"
             )
+        discord_webhook = requests.post(
+            os.getenv("DISCORD_WEBHOOK_URL"),
+            json={
+                "content": f"successfuly redeployed {repo_config.name} to {repo_config.branch} in {repo_config.path}"
+            },
+        )
+        if discord_webhook.status_code not in (200, 204):
+            logger.error(
+                f"Discord webhook failed with status code: {discord_webhook.status_code}"
+            )
+        else:
+            logger.info(f"Discord webhook response: {discord_webhook.text}")
     except Exception:
         logger.exception("update_repo had a bad time")
 
