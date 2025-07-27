@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import logging
 import os
@@ -5,10 +6,13 @@ import subprocess
 import threading
 from pathlib import Path
 
+import dotenv
 import uvicorn
 import yaml
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+
+dotenv.load_dotenv()
 
 app = FastAPI()
 
@@ -19,79 +23,117 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# in evan we trust
 logging.basicConfig(
-    format="%(asctime)s.%(msecs)03dZ %(levelname)s:%(name)s:%(message)s",
+    # in mondo we trust
+    format="%(asctime)s.%(msecs)03dZ %(threadName)s %(levelname)s:%(name)s:%(message)s",
     datefmt="%Y-%m-%dT%H:%M:%S",
     level=logging.INFO,
 )
+logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
+logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
+
 
 logger = logging.getLogger(__name__)
 
-with open("config.yml") as f:
-    config = yaml.safe_load(f)
 
-BASE_PATH = Path(config["base_path"])
-WATCHED_REPOS = {(repo["name"], repo["branch"]) for repo in config["repos"]}
+@dataclasses.dataclass
+class RepoToWatch:
+    name: str
+    branch: str
+    path: str
 
-def update_repo(repo_name: str, branch: str):
-    logger.info(f"updating {repo_name} to {branch}")
+
+def load_config():
+    result = {}
+    with open("config.yml") as f:
+        loaded_yaml = yaml.safe_load(f)
+        for config in loaded_yaml.get("repos", []):
+            parsed = RepoToWatch(**config)
+            result[(parsed.name, parsed.branch)] = parsed
+
+    return result
+
+
+config = load_config()
+
+
+def update_repo(repo_config: RepoToWatch):
+    logger.info(
+        f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
+    )
     try:
-        repo_path = BASE_PATH / repo_name
-        logger.info(f"Changing to directory: {repo_path}")
-        
-        os.chdir(repo_path)
-        
-        git_result = subprocess.run(['git', 'pull', 'origin', branch])
-        logger.info(f"Git pull output: {git_result.stdout}")
-        if git_result.stderr:
-            logger.info(f"Git pull status: {git_result.stderr}")
-        
-        docker_result = subprocess.run(['docker-compose', 'up', '--build', '-d'])
-        logger.info(f"Docker compose output: {docker_result.stdout}")
+        git_result = subprocess.run(
+            ["git", "pull", "origin", repo_config.branch], cwd=repo_config.path
+        )
+        logger.info(f"Git pull stdout: {git_result.stdout}")
+        logger.info(f"Git pull stderr: {git_result.stderr}")
+
+        docker_result = subprocess.run(
+            ["docker-compose", "up", "--build", "-d"], cwd=repo_config.path
+        )
+        logger.info(f"Docker compose stdout: {docker_result.stdout}")
+        logger.info(f"Docker compose stdout: {docker_result.stderr}")
         if docker_result.returncode != 0:
-            logger.error(f"Docker compose failed with status: {docker_result.returncode}")
-            
-    except Exception as e:
-        logger.error(f"Error updating repository: {str(e)}")
-        logger.error(f"Current working directory: {os.getcwd()}")
+            logger.error(
+                f"Docker compose exited with nonzero status: {docker_result.returncode}"
+            )
+    except Exception:
+        logger.exception("update_repo had a bad time")
+
 
 @app.post("/webhook")
 async def github_webhook(request: Request):
     payload_body = await request.body()
     payload = json.loads(payload_body)
-    print(payload)
-    
+
+    event_header = request.headers.get("X-GitHub-Event")
     # check if this is a push event
-    if request.headers.get("X-GitHub-Event") == "push":
-        ref = payload.get("ref")
-        branch = ref.split("/")[-1]
-        repo_name = payload.get("repository").get("name")
-        
-        if (repo_name, branch) in WATCHED_REPOS:
-            logger.info(f"Push to {branch} detected for {repo_name}")
-            # update the repo
-            thread = threading.Thread(target=update_repo, args=(repo_name, branch))
-            thread.start()
-    
+    if event_header != "push":
+        return {
+            "status": f"X-GitHub-Event header was not set to push, got value {event_header}"
+        }
+
+    ref = payload.get("ref", "")
+    branch = ref.split("/")[-1]
+    repo_name = payload.get("repository", {}).get("name")
+
+    key = (repo_name, branch)
+    if key not in config:
+        return {"status": f"not acting on repo and branch name of {key}"}
+
+    logger.info(f"Push to {branch} detected for {repo_name}")
+    # update the repo
+    thread = threading.Thread(target=update_repo, args=(config[key],))
+    thread.start()
+
     return {"status": "webhook received"}
+
 
 @app.get("/")
 def read_root():
     return {"message": "SCE CICD Server"}
 
+
 def start_smee():
     try:
-        result = subprocess.run(['tmux', 'has-session', '-t', 'smee'], capture_output=True)
-        if result.returncode != 0:
-            subprocess.run(['tmux', 'new-session', '-d', '-s', 'smee'])
-        
         # sends the smee command to the tmux session named smee
-        smee_cmd = f"smee --url {os.getenv('SMEE_URL')} --target http://127.0.0.1:3000/webhook"
-        subprocess.run(['tmux', 'send-keys', '-t', 'smee', smee_cmd, 'Enter'])
-        logger.info("Smee started in tmux session 'smee'")
-    except Exception as e:
-        logger.error(f"Error starting smee: {e}")
+        smee_cmd = [
+            "npx",
+            "smee",
+            "--url",
+            os.getenv("SMEE_URL"),
+            "--target",
+            "http://127.0.0.1:3000/webhook",
+        ]
+        logger.info(f"{' '.join(smee_cmd)}")
+
+        process = subprocess.Popen(
+            smee_cmd,
+        )
+        logger.info(f"smee started with PID {process.pid}")
+    except Exception:
+        logger.exception("Error starting smee")
+
 
 if __name__ == "__main__":
     start_smee()

@@ -2,3 +2,4 @@ fastapi==0.84.0
 uvicorn==0.18.3
 requests
 pyyaml
+python-dotenv==1.1.1
