@@ -125,7 +125,6 @@ def start_smee():
             "--target",
             "http://127.0.0.1:3000/webhook",
         ]
-        logger.info(f"{' '.join(smee_cmd)}")
 
         process = subprocess.Popen(
             smee_cmd,
@@ -134,7 +133,8 @@ def start_smee():
     except Exception:
         logger.exception("Error starting smee")
 
+if __name__ == "server":
+    start_smee()
 
 if __name__ == "__main__":
-    start_smee()
     uvicorn.run("server:app", port=3000, reload=True)
