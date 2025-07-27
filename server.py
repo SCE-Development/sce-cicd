@@ -95,4 +95,4 @@ def start_smee():
 
 if __name__ == "__main__":
     start_smee()
-    uvicorn.run(app, port=3000)
+    uvicorn.run("server:app", port=3000, reload=True)
