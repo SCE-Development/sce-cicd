@@ -3,3 +3,4 @@
 node_modules/
 *.json
 !package.json
+__pycache__/
