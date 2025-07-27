@@ -1,5 +1,4 @@
-base_path: /home/sce
-
 repos:
   - name: git-workshop
     branch: main
+    path: /home/sce/git-workshop
