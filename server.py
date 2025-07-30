@@ -11,7 +11,7 @@ import yaml
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 import requests
-from time import time
+import time
 from metrics import MetricsHandler
 
 
@@ -65,7 +65,7 @@ config = load_config()
 
 
 def update_repo(repo_config: RepoToWatch):
-    MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time())
+    MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
     )
@@ -103,7 +103,7 @@ def update_repo(repo_config: RepoToWatch):
 
 @app.post("/webhook")
 async def github_webhook(request: Request):
-    MetricsHandler.last_smee_request_timestamp.set(time())
+    MetricsHandler.last_smee_request_timestamp.set(time.time())
     payload_body = await request.body()
     payload = json.loads(payload_body)
 
