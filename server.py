@@ -11,10 +11,11 @@ import yaml
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 import requests
-import time
+from time import time
+from metrics import MetricsHandler
 
 
-from prometheus_client import Gauge, generate_latest
+from prometheus_client import generate_latest
 
 
 load_dotenv()
@@ -64,7 +65,7 @@ config = load_config()
 
 
 def update_repo(repo_config: RepoToWatch):
-    last_push_timestamp.labels(repo=repo_config.name).set(time.time())
+    MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time())
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
     )
@@ -102,7 +103,7 @@ def update_repo(repo_config: RepoToWatch):
 
 @app.post("/webhook")
 async def github_webhook(request: Request):
-    last_smee_request.set(time.time())
+    MetricsHandler.last_smee_request_timestamp.set(time())
     payload_body = await request.body()
     payload = json.loads(payload_body)
 
@@ -163,11 +164,7 @@ def start_smee():
 
 
 if __name__ == "server":
-    global last_smee_request
-    last_smee_request = Gauge("last_smee_request_timestamp", "last request from Smee")
-    global last_push_timestamp
-    last_push_timestamp = Gauge("last_push_timestamp", "last Git push", ["repo"])
-    # bug where metrics are being initalized more than once
+    MetricsHandler.init()
     start_smee()
 
 if __name__ == "__main__":
