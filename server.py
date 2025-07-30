@@ -9,13 +9,22 @@ from pathlib import Path
 import dotenv
 import uvicorn
 import yaml
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-import requests
+import requests 
+import time
+
+
+from prometheus_client import start_http_server, Gauge, generate_latest, CONTENT_TYPE_LATEST
+
 
 dotenv.load_dotenv()
 
 app = FastAPI()
+
+
+last_smee_request = Gauge("last_smee_request_timestamp", "last request from Smee")
+last_push_timestamp = Gauge("last_push_timestamp", "last Git push", ["repo"])
 
 app.add_middleware(
     CORSMiddleware,
@@ -59,6 +68,7 @@ config = load_config()
 
 
 def update_repo(repo_config: RepoToWatch):
+    last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
     )
@@ -96,6 +106,7 @@ def update_repo(repo_config: RepoToWatch):
 
 @app.post("/webhook")
 async def github_webhook(request: Request):
+    last_smee_request.set(time.time()) 
     payload_body = await request.body()
     payload = json.loads(payload_body)
 
@@ -121,6 +132,12 @@ async def github_webhook(request: Request):
 
     return {"status": "webhook received"}
 
+@app.get("/metrics")
+def get_metrics():
+    return Response(
+        media_type="text/plain",
+        content=generate_latest(),
+    ) 
 
 @app.get("/")
 def read_root():
