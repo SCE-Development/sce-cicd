@@ -1,4 +1,4 @@
 repos:
-  - name: git-workshop
-    branch: main
-    path: /home/sce/git-workshop
+  - name: monitoring
+    branch: master
+    path: /home/sce/monitoring
