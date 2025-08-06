@@ -86,7 +86,7 @@ def update_repo(repo_config: RepoToWatch):
                 f"Docker compose exited with nonzero status: {docker_result.returncode}"
             )
         discord_webhook = requests.post(
-            str(os.getenv("DISCORD_WEBHOOK_URL")),
+            str(os.getenv("CICD_DISCORD_WEBHOOK_URL")),
             json={
                 "content": f"successfuly redeployed {repo_config.name} to {repo_config.branch} in {repo_config.path}"
             },
