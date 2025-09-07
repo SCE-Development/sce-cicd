@@ -1,3 +1,4 @@
+import argparse
 import dataclasses
 import json
 import logging
@@ -63,12 +64,22 @@ def load_config():
 
 config = load_config()
 
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--development", action='store_true')
+    return parser.parse_args()
+
+args = get_args()
 
 def update_repo(repo_config: RepoToWatch):
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
     )
+
+    if args.development:
+        logging.warning("skipping command to update, we are in development mode")
+        return
     try:
         git_result = subprocess.run(
             ["git", "pull", "origin", repo_config.branch], cwd=repo_config.path
@@ -119,7 +130,14 @@ async def github_webhook(request: Request):
     repo_name = payload.get("repository", {}).get("name")
 
     key = (repo_name, branch)
+
+    if args.development and key not in config:
+        # if we are in development mode, pretend that
+        # we wanted to watch this repo no matter what
+        config[key] = RepoToWatch(name=repo_name, branch=branch, path='/dev/null')
+
     if key not in config:
+        logging.warning(f"not acting on repo and branch name of {key}")
         return {"status": f"not acting on repo and branch name of {key}"}
 
     logger.info(f"Push to {branch} detected for {repo_name}")
@@ -165,7 +183,7 @@ def start_smee():
 
 if __name__ == "server":
     MetricsHandler.init()
-    start_smee()
 
 if __name__ == "__main__":
+    start_smee()
     uvicorn.run("server:app", port=3000, reload=True)
