@@ -3,3 +3,4 @@ uvicorn==0.18.3
 requests
 pyyaml
 python-dotenv==1.1.1
+py-grpc-prometheus==0.7.0
