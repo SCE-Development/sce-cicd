@@ -100,7 +100,7 @@ curl -X POST SMEE_URL_GOES_HERE \
   -d '{
         "ref": "refs/heads/main",
         "repository": {
-          "name": "my-test-repo"
+          "name": "git-workshop"
         }
       }'
 ```
