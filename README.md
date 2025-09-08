@@ -71,3 +71,18 @@ sudo make altinstall
 # you should now be able to run python3.10 without issue
 python3.10
 ```
+#### why install node-fetch?
+to get around this error
+```
+TypeError: this.fetch is not a function
+    at Client.onmessage (/path/to/sce-cicd/node_modules/smee-client/index.js:44:41)
+    at EventSource.emit (events.js:314:20)
+    at _emit (/path/to/sce-cicd/node_modules/eventsource/lib/eventsource.js:287:17)
+    at parseEventStreamLine (/path/to/sce-cicd/node_modules/eventsource/lib/eventsource.js:302:9)
+    at IncomingMessage.<anonymous> (/path/to/sce-cicd/node_modules/eventsource/lib/eventsource.js:259:11)
+    at IncomingMessage.emit (events.js:314:20)
+    at addChunk (_stream_readable.js:304:12)
+    at readableAddChunk (_stream_readable.js:280:9)
+    at IncomingMessage.Readable.push (_stream_readable.js:219:10)
+    at HTTPParser.parserOnBody (_http_common.js:132:24)
+```

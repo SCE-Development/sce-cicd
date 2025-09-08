@@ -1,5 +1,8 @@
 require('dotenv').config();
 
+const fetch = require('node-fetch');
+global.fetch = fetch;
+
 const SmeeClient = require('smee-client')
 
 const smee = new SmeeClient({
