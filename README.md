@@ -86,3 +86,21 @@ TypeError: this.fetch is not a function
     at IncomingMessage.Readable.push (_stream_readable.js:219:10)
     at HTTPParser.parserOnBody (_http_common.js:132:24)
 ```
+#### applying smee-fetch.patch?
+```sh
+# after npm install, assuming ur on the real machine
+patch /home/sce/sce-cicd/node_modules/smee-client/index.js < smee-fetch.patch
+```
+#### testing without pushing a commit?
+you can use curl, for example
+```sh
+curl -X POST SMEE_URL_GOES_HERE \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: push" \
+  -d '{
+        "ref": "refs/heads/main",
+        "repository": {
+          "name": "my-test-repo"
+        }
+      }'
+```
