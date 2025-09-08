@@ -20,3 +20,8 @@ python -m pip install -r requirements.txt
 ```sh
 python server.py --development
 ```
+
+### for development
+- [ ] follow the above steps to setup + the server
+- [ ] push small, random commits directly to https://github.com/SCE-Development/git-workshop
+- [ ] ensure that the embeds + logs as a result of the above activity
