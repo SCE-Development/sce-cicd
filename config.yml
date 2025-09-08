@@ -1,4 +1,0 @@
-repos:
-  - name: monitoring
-    branch: master
-    path: /home/sce/monitoring

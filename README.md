@@ -21,6 +21,16 @@ source ./.venv/bin/activate
 
 python -m pip install -r requirements.txt
 ```
+- [ ] (if not development) create a config file like
+```yml
+repos:
+  - name: git-workshop
+    branch: main
+    path: /home/sce/git-workshop
+  - name: monitoring
+    branch: main
+    path: /home/sce/monitoring
+```
 - [ ] in the same terminal, run the server with
 ```sh
 python server.py --development

@@ -57,8 +57,10 @@ class RepoUpdateResult:
     development: bool = False
 
 
-def load_config():
+def load_config(development: bool):
     result = {}
+    if development:
+        return result
     with open("config.yml") as f:
         loaded_yaml = yaml.safe_load(f)
         for config in loaded_yaml.get("repos", []):
@@ -68,14 +70,14 @@ def load_config():
     return result
 
 
-config = load_config()
-
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--development", action='store_true')
     return parser.parse_args()
 
 args = get_args()
+
+config = load_config(args.development)
 
 def push_update_success_as_discord_embed(repo_config: RepoToWatch, result: RepoUpdateResult):
     repo_name = repo_config.name
