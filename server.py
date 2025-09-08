@@ -79,9 +79,14 @@ args = get_args()
 
 def push_update_success_as_discord_embed(repo_config: RepoToWatch, result: RepoUpdateResult):
     repo_name = repo_config.name
+    # default green
+    color = 0x57F287
     if result.development:
         prefix = '[development mode]'
         repo_name = prefix + ' ' + repo_name
+        # do a gray color if we are sending "not real" embeds
+        color = 0x99AAB5
+
     embed_json = {
         "embeds": [
             {
@@ -91,7 +96,7 @@ def push_update_success_as_discord_embed(repo_config: RepoToWatch, result: RepoU
                     f"• git pull exited with code **{result.git_exit_code}**",
                     f"• docker-compose up exited with code **{result.docker_exit_code}**"
                 ]),
-                "color": 0x57F287
+                "color": color
             }
         ]
     }
