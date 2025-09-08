@@ -50,6 +50,11 @@ class RepoToWatch:
     branch: str
     path: str
 
+@dataclasses.dataclass
+class RepoUpdateResult:
+    git_exit_code: int = 0
+    docker_exit_code: int = 0
+
 
 def load_config():
     result = {}
@@ -71,43 +76,60 @@ def get_args():
 
 args = get_args()
 
-def update_repo(repo_config: RepoToWatch):
+def push_update_success_as_discord_embed(repo_config: RepoToWatch, result: RepoUpdateResult):
+    embed_json = {
+        "embeds": [
+            {
+                "title": f"{repo_config.name} was successfully updated",
+                "url": "https://github.com/SCE-Development/" + repo_config.name,  # link to CICD project repo
+                "description": "\n".join([
+                    f"• git pull exited with code **{result.git_exit_code}**",
+                    f"• docker-compose up exited with code **{result.docker_exit_code}**"
+                ]),
+                "color": 0x57F287
+            }
+        ]
+    }
+    try:
+        discord_webhook = requests.post(
+            str(os.getenv("CICD_DISCORD_WEBHOOK_URL")),
+            json=embed_json,
+        )
+        if discord_webhook.status_code in (200, 204):
+            return logger.info(f"Discord webhook response: {discord_webhook.text}")
+
+        logger.error(
+            f"Discord webhook returned status code: {discord_webhook.status_code} with text {discord_webhook.text}"
+        )
+    except Exception:
+        logger.exception("push_update_success_as_discord_embed had a bad time")
+
+def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
     )
 
+    result = RepoUpdateResult()
+
     if args.development:
         logging.warning("skipping command to update, we are in development mode")
-        return
+        return push_update_success_as_discord_embed(repo_config, result)
     try:
         git_result = subprocess.run(
             ["git", "pull", "origin", repo_config.branch], cwd=repo_config.path
         )
         logger.info(f"Git pull stdout: {git_result.stdout}")
         logger.info(f"Git pull stderr: {git_result.stderr}")
+        result.git_exit_code = git_result.returncode
 
         docker_result = subprocess.run(
             ["docker-compose", "up", "--build", "-d"], cwd=repo_config.path
         )
         logger.info(f"Docker compose stdout: {docker_result.stdout}")
         logger.info(f"Docker compose stdout: {docker_result.stderr}")
-        if docker_result.returncode != 0:
-            logger.error(
-                f"Docker compose exited with nonzero status: {docker_result.returncode}"
-            )
-        discord_webhook = requests.post(
-            str(os.getenv("CICD_DISCORD_WEBHOOK_URL")),
-            json={
-                "content": f"successfuly redeployed {repo_config.name} to {repo_config.branch} in {repo_config.path}"
-            },
-        )
-        if discord_webhook.status_code not in (200, 204):
-            logger.error(
-                f"Discord webhook failed with status code: {discord_webhook.status_code}"
-            )
-        else:
-            logger.info(f"Discord webhook response: {discord_webhook.text}")
+        result.git_exit_code = git_result.returncode
+        push_update_success_as_discord_embed(repo_config, result)
     except Exception:
         logger.exception("update_repo had a bad time")
 
