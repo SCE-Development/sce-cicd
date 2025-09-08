@@ -2,6 +2,11 @@
 
 ### how to run
 - [ ] get the smee url and discord webhook url from a dev member
+- [ ] create a `.env` file like
+```
+SMEE_URL=https://smee.io/SOME_VALUE_HERE
+CICD_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/REST_OF_VALUE_HERE
+```
 - [ ] install smee
 ```sh
 # from within the folder of this project
