@@ -54,6 +54,7 @@ class RepoToWatch:
 class RepoUpdateResult:
     git_exit_code: int = 0
     docker_exit_code: int = 0
+    development: bool = False
 
 
 def load_config():
@@ -77,10 +78,14 @@ def get_args():
 args = get_args()
 
 def push_update_success_as_discord_embed(repo_config: RepoToWatch, result: RepoUpdateResult):
+    repo_name = repo_config.name
+    if result.development:
+        prefix = '[development mode]'
+        repo_name = prefix + ' ' + repo_name
     embed_json = {
         "embeds": [
             {
-                "title": f"{repo_config.name} was successfully updated",
+                "title": f"{repo_name} was successfully updated",
                 "url": "https://github.com/SCE-Development/" + repo_config.name,  # link to CICD project repo
                 "description": "\n".join([
                     f"• git pull exited with code **{result.git_exit_code}**",
@@ -114,6 +119,7 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
 
     if args.development:
         logging.warning("skipping command to update, we are in development mode")
+        result.development = True
         return push_update_success_as_discord_embed(repo_config, result)
     try:
         git_result = subprocess.run(
