@@ -100,11 +100,11 @@ def push_update_success_as_discord_embed(repo_config: RepoToWatch, result: RepoU
                 "url": "https://github.com/SCE-Development/" + repo_config.name,  # link to CICD project repo
                 "description": "\n".join([
                     f"• git pull exited with code **{result.git_exit_code}**",
-                    f"• git stdout: **{result.git_stdout or "No output"}**",
-                    f"• git stderr: **{result.git_stderr or "No output"}**",
+                    f"• git stdout: **```{result.git_stdout or "No output"}```**",
+                    f"• git stderr: **```{result.git_stderr or "No output"}```**",
                     f"• docker-compose up exited with code **{result.docker_exit_code}**",
-                    f"• docker-compose up stdout: **{result.docker_stdout or "No output"}**",
-                    f"• docker-compose up stderr: **{result.docker_stderr or "No output"}**"
+                    f"• docker-compose up stdout: **```{result.docker_stdout or "No output"}```**",
+                    f"• docker-compose up stderr: **```{result.docker_stderr or "No output"}```**"
                 ]),
                 "color": color
             }
