@@ -50,6 +50,7 @@ class RepoToWatch:
     branch: str
     path: str
 
+
 @dataclasses.dataclass
 class RepoUpdateResult:
     git_exit_code: int = 0
@@ -76,20 +77,24 @@ def load_config(development: bool):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--development", action='store_true')
+    parser.add_argument("--development", action="store_true")
     return parser.parse_args()
+
 
 args = get_args()
 
 config = load_config(args.development)
 
-def push_update_success_as_discord_embed(repo_config: RepoToWatch, result: RepoUpdateResult):
+
+def push_update_success_as_discord_embed(
+    repo_config: RepoToWatch, result: RepoUpdateResult
+):
     repo_name = repo_config.name
     # default green
     color = 0x57F287
     if result.development:
-        prefix = '[development mode]'
-        repo_name = prefix + ' ' + repo_name
+        prefix = "[development mode]"
+        repo_name = prefix + " " + repo_name
         # do a gray color if we are sending "not real" embeds
         color = 0x99AAB5
 
@@ -97,16 +102,19 @@ def push_update_success_as_discord_embed(repo_config: RepoToWatch, result: RepoU
         "embeds": [
             {
                 "title": f"{repo_name} was successfully updated",
-                "url": "https://github.com/SCE-Development/" + repo_config.name,  # link to CICD project repo
-                "description": "\n".join([
-                    f"• git pull exited with code **{result.git_exit_code}**",
-                    f"• git stdout: **```{result.git_stdout or "No output"}```**",
-                    f"• git stderr: **```{result.git_stderr or "No output"}```**",
-                    f"• docker-compose up exited with code **{result.docker_exit_code}**",
-                    f"• docker-compose up stdout: **```{result.docker_stdout or "No output"}```**",
-                    f"• docker-compose up stderr: **```{result.docker_stderr or "No output"}```**"
-                ]),
-                "color": color
+                "url": "https://github.com/SCE-Development/"
+                + repo_config.name,  # link to CICD project repo
+                "description": "\n".join(
+                    [
+                        f"• git pull exited with code **{result.git_exit_code}**",
+                        f"• git stdout: **```{result.git_stdout or 'No output'}```**",
+                        f"• git stderr: **```{result.git_stderr or 'No output'}```**",
+                        f"• docker-compose up exited with code **{result.docker_exit_code}**",
+                        f"• docker-compose up stdout: **```{result.docker_stdout or 'No output'}```**",
+                        f"• docker-compose up stderr: **```{result.docker_stderr or 'No output'}```**",
+                    ]
+                ),
+                "color": color,
             }
         ]
     }
@@ -124,6 +132,7 @@ def push_update_success_as_discord_embed(repo_config: RepoToWatch, result: RepoU
     except Exception:
         logger.exception("push_update_success_as_discord_embed had a bad time")
 
+
 def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
@@ -138,7 +147,10 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
         return push_update_success_as_discord_embed(repo_config, result)
     try:
         git_result = subprocess.run(
-            ["git", "pull", "origin", repo_config.branch], cwd=repo_config.path, capture_output=True, text=True
+            ["git", "pull", "origin", repo_config.branch],
+            cwd=repo_config.path,
+            capture_output=True,
+            text=True,
         )
         logger.info(f"Git pull stdout: {git_result.stdout}")
         logger.info(f"Git pull stderr: {git_result.stderr}")
@@ -147,7 +159,10 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
         result.git_exit_code = git_result.returncode
 
         docker_result = subprocess.run(
-            ["docker-compose", "up", "--build", "-d"], cwd=repo_config.path, capture_output=True, text=True
+            ["docker-compose", "up", "--build", "-d"],
+            cwd=repo_config.path,
+            capture_output=True,
+            text=True,
         )
         logger.info(f"Docker compose stdout: {docker_result.stdout}")
         logger.info(f"Docker compose stdout: {docker_result.stderr}")
@@ -181,7 +196,7 @@ async def github_webhook(request: Request):
     if args.development and key not in config:
         # if we are in development mode, pretend that
         # we wanted to watch this repo no matter what
-        config[key] = RepoToWatch(name=repo_name, branch=branch, path='/dev/null')
+        config[key] = RepoToWatch(name=repo_name, branch=branch, path="/dev/null")
 
     if key not in config:
         logging.warning(f"not acting on repo and branch name of {key}")
