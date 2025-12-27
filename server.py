@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import threading
+import socket
 
 from dotenv import load_dotenv
 import uvicorn
@@ -14,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import time
 from metrics import MetricsHandler
-
 
 from prometheus_client import generate_latest
 
@@ -107,7 +107,7 @@ def push_update_success_as_discord_embed(
     author_username = author.get('username', None)
     author_url = f"https://github.com/{author_username}" if author_username else "https://github.com/"
     user_env = os.environ.get('USER') or os.environ.get('USERNAME', 'unknown')
-    hostname_env = os.environ.get('HOSTNAME') or os.environ.get('COMPUTERNAME', 'unknown')
+    hostname_env = os.environ.get('HOSTNAME') or os.environ.get('COMPUTERNAME', 'unknown') or socket.gethostname()
 
     # Title
     title = f"[{repo_config.name}:{branch}] Deployment Successful {commit_id} — {commit_message}"
@@ -126,9 +126,9 @@ def push_update_success_as_discord_embed(
         ("docker-compose up stderr", result.docker_stderr),
     ]
     output_lines = []
-    for title, value in codeblocks:
+    for block_title, value in codeblocks:
         if value:
-            output_lines.append(f"• {title}: **```{value}```**")
+            output_lines.append(f"• {block_title}:\n```\n{value}\n```")
 
     description = "\n".join([first_line] + exit_codes + output_lines)
     embed_json = {
@@ -227,6 +227,8 @@ async def github_webhook(request: Request):
         return {"status": f"not acting on repo and branch name of {key}"}
 
     logger.info(f"Push to {branch} detected for {repo_name}")
+    # extract commit info from payload
+    commit = payload.get("head.commit", {})
     # update the repo
     thread = threading.Thread(target=update_repo, args=(config[key],))
     thread.start()
