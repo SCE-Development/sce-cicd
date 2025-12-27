@@ -156,13 +156,14 @@ def push_update_success_as_discord_embed(
         logger.exception("push_update_success_as_discord_embed had a bad time")
 
 
-def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
+def update_repo(repo_config: RepoToWatch, commit=None) -> RepoUpdateResult:
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
     )
 
     result = RepoUpdateResult()
+    result.commit = commit
 
     if args.development:
         logging.warning("skipping command to update, we are in development mode")
