@@ -107,8 +107,8 @@ def push_update_success_as_discord_embed(
     author_name = author.get('name', 'unknown')
     author_username = author.get('username', None)
     author_url = f"https://github.com/{author_username}" if author_username else "https://github.com/"
-    user_env = os.environ.get('USER', 'unknown')
-    hostname_env = os.environ.get('HOSTNAME', 'unknown')
+    user_env = os.environ.get('USER') or os.environ.get('USERNAME', 'unknown')
+    hostname_env = os.environ.get('HOSTNAME') or os.environ.get('COMPUTERNAME', 'unknown')
 
     # Title
     title = f"[{repo_config.name}:{branch}] Deployment Successful [{commit_id}]({commit_url}) — {commit_message}"
