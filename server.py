@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import threading
+import socket
 
 from dotenv import load_dotenv
 import uvicorn
@@ -14,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import time
 from metrics import MetricsHandler
-
 
 from prometheus_client import generate_latest
 
@@ -97,23 +97,46 @@ def push_update_success_as_discord_embed(
         repo_name = prefix + " " + repo_name
         # do a gray color if we are sending "not real" embeds
         color = 0x99AAB5
+    commit = getattr(result, 'commit', None)
+    branch = getattr(result, 'branch', None) or getattr(repo_config, 'branch', 'main')
+    commit_id = getattr(result, 'commit_id', None) or (commit['id'][:7] if commit and 'id' in commit else 'unknown')
+    commit_url = getattr(result, 'commit_url', None) or (commit['url'] if commit and 'url' in commit else 'https://github.com/SCE-Development/')
+    commit_message = getattr(result, 'commit_message', None) or (commit['message'] if commit and 'message' in commit else 'No commit message')
+    author = getattr(result, 'author', None) or (commit['author'] if commit and 'author' in commit else {})
+    author_name = author.get('name', 'unknown')
+    author_username = author.get('username', None)
+    author_url = f"https://github.com/{author_username}" if author_username else "https://github.com/"
+    user_env = os.environ.get('USER') or os.environ.get('USERNAME', 'unknown')
+    hostname_env = os.environ.get('HOSTNAME') or os.environ.get('COMPUTERNAME', 'unknown') or socket.gethostname()
 
+    # Title
+    title = f"[{repo_config.name}:{branch}] Deployment Successful {commit_id} — {commit_message}"
+    # First line
+    first_line = f"Author: [{author_name}]({author_url}), environment: {user_env}@{hostname_env}"
+    # Exit codes
+    exit_codes = [
+        f"• git pull exited with code **{result.git_exit_code}**",
+        f"• docker-compose up exited with code **{result.docker_exit_code}**",
+    ]
+    # Outputs (if any)
+    codeblocks = [
+        ("git stdout",f result.git_stdout),
+        ("git stderr", result.git_stderr),
+        ("docker-compose up stdout", result.docker_stdout),
+        ("docker-compose up stderr", result.docker_stderr),
+    ]
+    output_lines = []
+    for block_title, value in codeblocks:
+        if value:
+            output_lines.append(f"• {block_title}:\n```\n{value}\n```")
+
+    description = "\n".join([first_line] + exit_codes + output_lines)
     embed_json = {
         "embeds": [
             {
-                "title": f"{repo_name} was successfully updated",
-                "url": "https://github.com/SCE-Development/"
-                + repo_config.name,  # link to CICD project repo
-                "description": "\n".join(
-                    [
-                        f"• git pull exited with code **{result.git_exit_code}**",
-                        f"• git stdout: **```{result.git_stdout or 'No output'}```**",
-                        f"• git stderr: **```{result.git_stderr or 'No output'}```**",
-                        f"• docker-compose up exited with code **{result.docker_exit_code}**",
-                        f"• docker-compose up stdout: **```{result.docker_stdout or 'No output'}```**",
-                        f"• docker-compose up stderr: **```{result.docker_stderr or 'No output'}```**",
-                    ]
-                ),
+                "title": title,
+                "url": commit_url,
+                "description": description,
                 "color": color,
             }
         ]
@@ -133,13 +156,14 @@ def push_update_success_as_discord_embed(
         logger.exception("push_update_success_as_discord_embed had a bad time")
 
 
-def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
+def update_repo(repo_config: RepoToWatch, commit=None) -> RepoUpdateResult:
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
     )
 
     result = RepoUpdateResult()
+    result.commit = commit
 
     if args.development:
         logging.warning("skipping command to update, we are in development mode")
@@ -203,6 +227,8 @@ async def github_webhook(request: Request):
         return {"status": f"not acting on repo and branch name of {key}"}
 
     logger.info(f"Push to {branch} detected for {repo_name}")
+    # extract commit info from payload
+    commit = payload.get("head.commit", {})
     # update the repo
     thread = threading.Thread(target=update_repo, args=(config[key],))
     thread.start()
