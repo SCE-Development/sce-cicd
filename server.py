@@ -97,23 +97,46 @@ def push_update_success_as_discord_embed(
         repo_name = prefix + " " + repo_name
         # do a gray color if we are sending "not real" embeds
         color = 0x99AAB5
+    import os
+    commit = getattr(result, 'commit', None)
+    branch = getattr(result, 'branch', None) or getattr(repo_config, 'branch', 'main')
+    commit_id = getattr(result, 'commit_id', None) or (commit['id'][:7] if commit and 'id' in commit else 'unknown')
+    commit_url = getattr(result, 'commit_url', None) or (commit['url'] if commit and 'url' in commit else 'https://github.com/SCE-Development/')
+    commit_message = getattr(result, 'commit_message', None) or (commit['message'] if commit and 'message' in commit else 'No commit message')
+    author = getattr(result, 'author', None) or (commit['author'] if commit and 'author' in commit else {})
+    author_name = author.get('name', 'unknown')
+    author_username = author.get('username', None)
+    author_url = f"https://github.com/{author_username}" if author_username else "https://github.com/"
+    user_env = os.environ.get('USER', 'unknown')
+    hostname_env = os.environ.get('HOSTNAME', 'unknown')
 
+    # Title
+    title = f"[{repo_config.name}:{branch}] Deployment Successful [{commit_id}]({commit_url}) — {commit_message}"
+    # First line
+    first_line = f"Author: [{author_name}]({author_url}), environment: {user_env}@{hostname_env}"
+    # Exit codes
+    exit_codes = [
+        f"• git pull exited with code **{result.git_exit_code}**",
+        f"• docker-compose up exited with code **{result.docker_exit_code}**",
+    ]
+    # Outputs (if any)
+    output_lines = []
+    if result.git_stdout:
+        output_lines.append(f"• git stdout: **```{result.git_stdout}```**")
+    if result.git_stderr:
+        output_lines.append(f"• git stderr: **```{result.git_stderr}```**")
+    if result.docker_stdout:
+        output_lines.append(f"• docker-compose up stdout: **```{result.docker_stdout}```**")
+    if result.docker_stderr:
+        output_lines.append(f"• docker-compose up stderr: **```{result.docker_stderr}```**")
+
+    description = "\n".join([first_line] + exit_codes + output_lines)
     embed_json = {
         "embeds": [
             {
-                "title": f"{repo_name} was successfully updated",
-                "url": "https://github.com/SCE-Development/"
-                + repo_config.name,  # link to CICD project repo
-                "description": "\n".join(
-                    [
-                        f"• git pull exited with code **{result.git_exit_code}**",
-                        f"• git stdout: **```{result.git_stdout or 'No output'}```**",
-                        f"• git stderr: **```{result.git_stderr or 'No output'}```**",
-                        f"• docker-compose up exited with code **{result.docker_exit_code}**",
-                        f"• docker-compose up stdout: **```{result.docker_stdout or 'No output'}```**",
-                        f"• docker-compose up stderr: **```{result.docker_stderr or 'No output'}```**",
-                    ]
-                ),
+                "title": title,
+                "url": commit_url,
+                "description": description,
                 "color": color,
             }
         ]
