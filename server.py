@@ -110,10 +110,11 @@ def push_update_success_as_discord_embed(
     hostname_env = os.environ.get('HOSTNAME') or os.environ.get('COMPUTERNAME', 'unknown') or socket.gethostname()
 
     # Title
-    title = f"[{repo_config.name}:{branch}] Deployment Successful {commit_id} — {commit_message}"
-    # First line
-    first_line = f"Author: [{author_name}]({author_url}), environment: {user_env}@{hostname_env}"
-    # Exit codes
+    title = "Deployment successful"
+    # Description: 
+    repo_branch_line = f"[{repo_config.name}:{branch}]"
+    commit_line = f"[{commit_id}]({commit_url}) — {commit_message}"
+    author_env_line = f"Author: [{author_username or author_name}]({author_url}), environment: {user_env}@{hostname_env}"
     exit_codes = [
         f"• git pull exited with code **{result.git_exit_code}**",
         f"• docker-compose up exited with code **{result.docker_exit_code}**",
