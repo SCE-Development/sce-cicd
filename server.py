@@ -130,7 +130,13 @@ def push_update_success_as_discord_embed(
         if value:
             output_lines.append(f"• {block_title}:\n```\n{value}\n```")
 
-    description = "\n".join([first_line] + exit_codes + output_lines)
+    description = "\n".join([
+        repo_branch_line,
+        commit_line,
+        "",
+        author_env_line,
+        ""
+    ] + exit_codes + output_lines)
     embed_json = {
         "embeds": [
             {
