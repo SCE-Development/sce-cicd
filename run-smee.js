@@ -8,4 +8,4 @@ const smee = new SmeeClient({
   logger: console
 })
 
-const events = smee.start()
+smee.start()

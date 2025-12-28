@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import threading
+import socket
 
 from dotenv import load_dotenv
 import uvicorn
@@ -14,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import time
 from metrics import MetricsHandler
-
 
 from prometheus_client import generate_latest
 
@@ -97,7 +97,6 @@ def push_update_success_as_discord_embed(
         repo_name = prefix + " " + repo_name
         # do a gray color if we are sending "not real" embeds
         color = 0x99AAB5
-    import os
     commit = getattr(result, 'commit', None)
     branch = getattr(result, 'branch', None) or getattr(repo_config, 'branch', 'main')
     commit_id = getattr(result, 'commit_id', None) or (commit['id'][:7] if commit and 'id' in commit else 'unknown')
@@ -108,10 +107,10 @@ def push_update_success_as_discord_embed(
     author_username = author.get('username', None)
     author_url = f"https://github.com/{author_username}" if author_username else "https://github.com/"
     user_env = os.environ.get('USER') or os.environ.get('USERNAME', 'unknown')
-    hostname_env = os.environ.get('HOSTNAME') or os.environ.get('COMPUTERNAME', 'unknown')
+    hostname_env = os.environ.get('HOSTNAME') or os.environ.get('COMPUTERNAME') or socket.gethostname()
 
-    # Title
-    title = f"[{repo_config.name}:{branch}] Deployment Successful [{commit_id}]({commit_url}) — {commit_message}"
+    # Title as plain text for Discord blue box, with commit id as Markdown link
+    title = f"{repo_config.name}:{branch} Deployment Successful [{commit_id}] — {commit_message}"
     # First line
     first_line = f"Author: [{author_name}]({author_url}), environment: {user_env}@{hostname_env}"
     # Exit codes
@@ -120,15 +119,16 @@ def push_update_success_as_discord_embed(
         f"• docker-compose up exited with code **{result.docker_exit_code}**",
     ]
     # Outputs (if any)
+    codeblocks = [
+        ("git stdout", result.git_stdout),
+        ("git stderr", result.git_stderr),
+        ("docker-compose up stdout", result.docker_stdout),
+        ("docker-compose up stderr", result.docker_stderr),
+    ]
     output_lines = []
-    if result.git_stdout:
-        output_lines.append(f"• git stdout: **```{result.git_stdout}```**")
-    if result.git_stderr:
-        output_lines.append(f"• git stderr: **```{result.git_stderr}```**")
-    if result.docker_stdout:
-        output_lines.append(f"• docker-compose up stdout: **```{result.docker_stdout}```**")
-    if result.docker_stderr:
-        output_lines.append(f"• docker-compose up stderr: **```{result.docker_stderr}```**")
+    for block_title, value in codeblocks:
+        if value:
+            output_lines.append(f"• {block_title}:\n```\n{value}\n```")
 
     description = "\n".join([first_line] + exit_codes + output_lines)
     embed_json = {
@@ -227,8 +227,10 @@ async def github_webhook(request: Request):
         return {"status": f"not acting on repo and branch name of {key}"}
 
     logger.info(f"Push to {branch} detected for {repo_name}")
-    # update the repo
-    thread = threading.Thread(target=update_repo, args=(config[key],))
+    # Extract commit info from payload
+    commit = payload.get("head_commit", {})
+    # update the repo, passing commit info
+    thread = threading.Thread(target=update_repo, args=(config[key], commit))
     thread.start()
 
     return {"status": "webhook received"}
@@ -265,7 +267,6 @@ def start_smee():
         logger.info(f"smee started with PID {process.pid}")
     except Exception:
         logger.exception("Error starting smee")
-
 
 if __name__ == "server":
     MetricsHandler.init()
