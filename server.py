@@ -60,6 +60,14 @@ class RepoUpdateResult:
     git_stderr: str = ""
     docker_stdout: str = ""
     docker_stderr: str = ""
+    commit: dict = None
+    branch: str = ""
+    commit_id: str = ""
+    commit_url: str = ""
+    commit_message: str = ""
+    author: dict = None
+    author_name: str = ""
+    author_username: str = ""
 
 
 def load_config(development: bool):
@@ -97,14 +105,14 @@ def push_update_success_as_discord_embed(
         repo_name = prefix + " " + repo_name
         # do a gray color if we are sending "not real" embeds
         color = 0x99AAB5
-    commit = getattr(result, 'commit', None)
-    branch = getattr(result, 'branch', None) or getattr(repo_config, 'branch', 'main')
-    commit_id = getattr(result, 'commit_id', None) or (commit['id'][:7] if commit and 'id' in commit else 'unknown')
-    commit_url = getattr(result, 'commit_url', None) or (commit['url'] if commit and 'url' in commit else 'https://github.com/SCE-Development/')
-    commit_message = getattr(result, 'commit_message', None) or (commit['message'] if commit and 'message' in commit else 'No commit message')
-    author = getattr(result, 'author', None) or (commit['author'] if commit and 'author' in commit else {})
-    author_name = author.get('name', 'unknown')
-    author_username = author.get('username', None)
+    commit = result.commit
+    branch = result.branch or getattr(repo_config, 'branch', 'main')
+    commit_id = result.commit_id or (commit['id'][:7] if commit and 'id' in commit else 'unknown')
+    commit_url = result.commit_url or (commit['url'] if commit and 'url' in commit else 'https://github.com/SCE-Development/')
+    commit_message = result.commit_message or (commit['message'] if commit and 'message' in commit else 'No commit message')
+    author = result.author or (commit['author'] if commit and 'author' in commit else {})
+    author_name = result.author_name or author.get('name', 'unknown')
+    author_username = result.author_username or author.get('username', None)
     author_url = f"https://github.com/{author_username}" if author_username else "https://github.com/"
     user_env = os.environ.get('USER') or os.environ.get('USERNAME', 'unknown')
     hostname_env = os.environ.get('HOSTNAME') or os.environ.get('COMPUTERNAME', 'unknown') or socket.gethostname()
@@ -131,13 +139,16 @@ def push_update_success_as_discord_embed(
         if value:
             output_lines.append(f"• {block_title}:\n```\n{value}\n```")
 
-    description = "\n".join([
+    description_list = [
         repo_branch_line,
         commit_line,
         "",
         author_env_line,
         ""
-    ] + exit_codes + output_lines)
+    ]
+    description_list.extend(exit_codes)
+    description_list.extend(output_lines)
+    description = "\n".join(description_list)
     embed_json = {
         "embeds": [
             {
