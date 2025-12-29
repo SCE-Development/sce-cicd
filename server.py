@@ -55,7 +55,7 @@ class RepoToWatch:
 class RepoUpdateResult:
     git_exit_code: int = 0
     docker_exit_code: int = 0
-    development: bool = False
+    author: dict = dataclasses.field(default_factory=dict)
     git_stdout: str = ""
     git_stderr: str = ""
     docker_stdout: str = ""
@@ -65,7 +65,6 @@ class RepoUpdateResult:
     commit_id: str = ""
     commit_url: str = ""
     commit_message: str = ""
-    author: dict = None
     author_name: str = ""
     author_username: str = ""
 
@@ -110,7 +109,7 @@ def push_update_success_as_discord_embed(
     commit_id = result.commit_id or (commit['id'][:7] if commit and 'id' in commit else 'unknown')
     commit_url = result.commit_url or (commit['url'] if commit and 'url' in commit else 'https://github.com/SCE-Development/')
     commit_message = result.commit_message or (commit['message'] if commit and 'message' in commit else 'No commit message')
-    author = result.author or {}
+    author = result.author
     author_name = result.author_name or author.get('name', 'unknown')
     author_username = result.author_username or author.get('username', None)
     author_url = f"https://github.com/{author_username}" if author_username else "https://github.com/"
@@ -129,7 +128,7 @@ def push_update_success_as_discord_embed(
     ]
     # Outputs (if any)
     codeblocks = [
-        ("git stdout",f result.git_stdout),
+        ("git stdout", result.git_stdout),
         ("git stderr", result.git_stderr),
         ("docker-compose up stdout", result.docker_stdout),
         ("docker-compose up stderr", result.docker_stderr),
@@ -246,9 +245,9 @@ async def github_webhook(request: Request):
 
     logger.info(f"Push to {branch} detected for {repo_name}")
     # extract commit info from payload
-    commit = payload.get("head.commit", {})
+    commit = payload.get("head_commit", {})
     # update the repo
-    thread = threading.Thread(target=update_repo, args=(config[key],))
+    thread = threading.Thread(target=update_repo, args=(config[key], commit))
     thread.start()
 
     return {"status": "webhook received"}
