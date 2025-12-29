@@ -110,7 +110,7 @@ def push_update_success_as_discord_embed(
     commit_id = result.commit_id or (commit['id'][:7] if commit and 'id' in commit else 'unknown')
     commit_url = result.commit_url or (commit['url'] if commit and 'url' in commit else 'https://github.com/SCE-Development/')
     commit_message = result.commit_message or (commit['message'] if commit and 'message' in commit else 'No commit message')
-    author = result.author or (commit['author'] if commit and 'author' in commit else {})
+    author = result.author or {}
     author_name = result.author_name or author.get('name', 'unknown')
     author_username = result.author_username or author.get('username', None)
     author_url = f"https://github.com/{author_username}" if author_username else "https://github.com/"
