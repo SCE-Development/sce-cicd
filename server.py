@@ -50,23 +50,30 @@ class RepoToWatch:
     branch: str
     path: str
 
+@dataclasses.dataclass
+class Author:
+    name: str = ""
+    url: str = ""
+    username: str = ""
+
+@dataclasses.dataclass
+class Commit:
+    id: str = ""
+    message: str = ""
+    branch: str = ""
+    url: str = ""
 
 @dataclasses.dataclass
 class RepoUpdateResult:
     git_exit_code: int = 0
     docker_exit_code: int = 0
-    author: dict = dataclasses.field(default_factory=dict)
+    author: Author = dataclasses.field(default_factory=Author)
+    commit: Commit = dataclasses.field(default_factory=Commit)
     git_stdout: str = ""
     git_stderr: str = ""
     docker_stdout: str = ""
     docker_stderr: str = ""
-    commit: dict = None
-    branch: str = ""
-    commit_id: str = ""
-    commit_url: str = ""
-    commit_message: str = ""
-    author_name: str = ""
-    author_username: str = ""
+    development: bool = False
 
 
 def load_config(development: bool):
@@ -105,14 +112,14 @@ def push_update_success_as_discord_embed(
         # do a gray color if we are sending "not real" embeds
         color = 0x99AAB5
     commit = result.commit
-    branch = result.branch or getattr(repo_config, 'branch', 'main')
-    commit_id = result.commit_id or (commit['id'][:7] if commit and 'id' in commit else 'unknown')
-    commit_url = result.commit_url or (commit['url'] if commit and 'url' in commit else 'https://github.com/SCE-Development/')
-    commit_message = result.commit_message or (commit['message'] if commit and 'message' in commit else 'No commit message')
+    branch = commit.branch or getattr(repo_config, 'branch', 'main')
+    commit_id = commit.id[:7] if commit.id else 'unknown'
+    commit_url = commit.url or 'https://github.com/SCE-Development/'
+    commit_message = commit.message or 'No commit message'
     author = result.author
-    author_name = result.author_name or author.get('name', 'unknown')
-    author_username = result.author_username or author.get('username', None)
-    author_url = f"https://github.com/{author_username}" if author_username else "https://github.com/"
+    author_name = author.name or 'unknown'
+    author_username = author.username or None
+    author_url = author.url or (f"https://github.com/{author_username}" if author_username else "https://github.com/")
     user_env = os.environ.get('USER') or os.environ.get('USERNAME', 'unknown')
     hostname_env = os.environ.get('HOSTNAME') or os.environ.get('COMPUTERNAME', 'unknown') or socket.gethostname()
 
@@ -178,9 +185,18 @@ def update_repo(repo_config: RepoToWatch, commit=None) -> RepoUpdateResult:
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
     )
-
-    result = RepoUpdateResult()
-    result.commit = commit
+    # Parse commit and author from dicts if provided
+    commit_obj = Commit()
+    author_obj = Author()
+    if commit:
+        commit_obj.id = commit.get('id', '')
+        commit_obj.message = commit.get('message', '')
+        commit_obj.branch = commit.get('branch', '')
+        commit_obj.url = commit.get('url', '')
+        author_info = commit.get('author', {})
+        author_obj.name = author_info.get('name', '')
+        author_obj.username = author_info.get('username', '')
+        author_obj.url = author_info.get('url', '')
 
     if args.development:
         logging.warning("skipping command to update, we are in development mode")
