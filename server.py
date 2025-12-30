@@ -52,14 +52,14 @@ class RepoToWatch:
 
 @dataclasses.dataclass
 class Author:
-    name: str = ""
+    name: str = "unknown"
     url: str = ""
-    username: str = ""
+    username: str = None
 
 @dataclasses.dataclass
 class Commit:
     id: str = ""
-    message: str = ""
+    message: str = "No commit message"
     branch: str = ""
     url: str = ""
 
@@ -115,10 +115,10 @@ def push_update_success_as_discord_embed(
     branch = commit.branch or getattr(repo_config, 'branch', 'main')
     commit_id = commit.id[:7] if commit.id else 'unknown'
     commit_url = commit.url or 'https://github.com/SCE-Development/'
-    commit_message = commit.message or 'No commit message'
+    commit_message = commit.message
     author = result.author
-    author_name = author.name or 'unknown'
-    author_username = author.username or None
+    author_name = author.name
+    author_username = author.username
     author_url = author.url or (f"https://github.com/{author_username}" if author_username else "https://github.com/")
     user_env = os.environ.get('USER') or os.environ.get('USERNAME', 'unknown')
     hostname_env = os.environ.get('HOSTNAME') or os.environ.get('COMPUTERNAME', 'unknown') or socket.gethostname()
