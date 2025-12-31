@@ -53,7 +53,7 @@ class RepoToWatch:
 @dataclasses.dataclass
 class Author:
     name: str = "unknown"
-    url: str = ""
+    url: str = "https://github.com/"
     username: str = None
 
 @dataclasses.dataclass
@@ -61,7 +61,7 @@ class Commit:
     id: str = ""
     message: str = "No commit message"
     branch: str = ""
-    url: str = ""
+    url: str = "https://github.com/SCE-Development/"
 
 @dataclasses.dataclass
 class RepoUpdateResult:
@@ -120,8 +120,8 @@ def push_update_success_as_discord_embed(
     author_name = author.name
     author_username = author.username
     author_url = author.url or (f"https://github.com/{author_username}" if author_username else "https://github.com/")
-    user_env = os.environ.get('USER') or os.environ.get('USERNAME', 'unknown')
-    hostname_env = os.environ.get('HOSTNAME') or os.environ.get('COMPUTERNAME', 'unknown') or socket.gethostname()
+    user_env = getpass.getuser()
+    hostname_env = socket.gethostname()
 
     # Title
     title = "Deployment successful"
