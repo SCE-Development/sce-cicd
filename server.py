@@ -1,4 +1,4 @@
-import sys
+
 import argparse
 import dataclasses
 import fnmatch
@@ -34,14 +34,7 @@ logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
 logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
-def cicd_check():
-    error_condition = False  # Set to True to simulate failure
-    if error_condition:
-        print("Error detected! Exiting with 1.")
-        sys.exit(1)
-    else:
-        print("All checks passed.")
-        sys.exit(0)
+
 
 @dataclasses.dataclass
 class RepoConfig:
