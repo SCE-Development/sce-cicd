@@ -173,10 +173,21 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
             text=True,
         )
         logger.info(f"Docker compose stdout: {docker_result.stdout}")
-        logger.info(f"Docker compose stdout: {docker_result.stderr}")
+        logger.info(f"Docker compose stderr: {docker_result.stderr}")
         result.docker_stdout = docker_result.stdout
         result.docker_stderr = docker_result.stderr
-        result.git_exit_code = git_result.returncode
+        result.docker_exit_code = docker_result.returncode
+
+        # Rollback if docker-compose fails
+        if docker_result.returncode != 0:
+            rollback_result = subprocess.run(
+                ["git", "reset", "--hard", "HEAD@{1}"],
+                cwd=repo_config.path,
+                capture_output=True,
+                text=True,
+            )
+            logger.warning(f"Rollback performed due to docker-compose failure. Rollback stdout: {rollback_result.stdout}, stderr: {rollback_result.stderr}")
+
         push_update_success_as_discord_embed(repo_config, result)
     except Exception:
         logger.exception("update_repo had a bad time")
