@@ -238,9 +238,6 @@ def get_metrics():
 def read_root():
     return {"message": "SCE CICD Server"}
 
-def check_actions_passed():
-    pass
-
 def start_smee():
     try:
         # sends the smee command to the tmux session named smee
