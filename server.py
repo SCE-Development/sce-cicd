@@ -183,7 +183,7 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
         # rollback command for terminal
         if docker_result.returncode != 0:
             logger.warning("\nROLLBACK INITIATED\n")
-            logger.warning(f"docker-compose failed (exit code {docker_result.returncode}), git pull exit code {git_result.returncode}. Rollback would be performed here (mocked in dev).")
+            logger.warning(f"docker-compose failed (exit code {docker_result.returncode}), git pull exit code {git_result.returncode}.")
             logger.warning("Rollback skipped for local development. No destructive git reset performed.")
             logger.warning("\nROLLBACK COMPLETE\n")
             result.git_exit_code = 1
