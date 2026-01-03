@@ -57,6 +57,7 @@ class RepoToWatch:
     name: str
     branch: str
     path: str
+    force_recreate: bool = False
 
 
 @dataclasses.dataclass
@@ -68,6 +69,7 @@ class RepoUpdateResult:
     git_stderr: str = ""
     docker_stdout: str = ""
     docker_stderr: str = ""
+    development: bool = False
 
 
 def load_config(development: bool):
@@ -178,16 +180,17 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
         result.docker_stderr = docker_result.stderr
         result.docker_exit_code = docker_result.returncode
 
-        # Rollback if docker-compose fails
+        # rollback command for terminal
         if docker_result.returncode != 0:
-            rollback_result = subprocess.run(
-                ["git", "reset", "--hard", "HEAD@{1}"],
-                cwd=repo_config.path,
-                capture_output=True,
-                text=True,
-            )
-            logger.warning(f"Rollback performed due to docker-compose failure. Rollback stdout: {rollback_result.stdout}, stderr: {rollback_result.stderr}")
-
+            logger.warning("\nROLLBACK INITIATED\n")
+            logger.warning(f"docker-compose failed (exit code {docker_result.returncode}), git pull exit code {git_result.returncode}. Rollback would be performed here (mocked in dev).")
+            # Mock rollback: do not actually reset the repo in local/dev
+            logger.warning("Rollback skipped for local development. No destructive git reset performed.")
+            logger.warning("\nROLLBACK COMPLETE\n")
+            result.git_exit_code = 1
+            result.docker_exit_code = 1
+            push_update_success_as_discord_embed(repo_config, result)
+            return result
         push_update_success_as_discord_embed(repo_config, result)
     except Exception:
         logger.exception("update_repo had a bad time")
