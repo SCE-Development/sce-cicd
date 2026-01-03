@@ -49,6 +49,7 @@ class RepoToWatch:
     name: str
     branch: str
     path: str
+    actions_need_to_pass: bool = False
 
 
 @dataclasses.dataclass
@@ -182,22 +183,36 @@ async def github_webhook(request: Request):
     print("Payload:", payload)  # simpler
 
     event_header = request.headers.get("X-GitHub-Event")
-    # check if this is a push event
-    if event_header != "push":
+    
+    # check if commit on branch passed actions based on type of event
+    actions_need_to_pass = False
+    if event_header == "push":
+        ref = payload.get("ref", "")
+        branch = ref.split("/")[-1]
+    elif event_header == "workflow_run":
+        workflow_run = payload.get("workflow_run", {})
+        status = workflow_run.get("status")
+        conclusion = workflow_run.get("conclusion")
+        branch = workflow_run.get("head_branch")
+
+        if status == "completed" and conclusion == "success": 
+            actions_need_to_pass = True
+        else: 
+            return {
+                "status": f"Committed changes did not pass requirements. Status: {status}"
+            }
+    else: 
         return {
-            "status": f"X-GitHub-Event header was not set to push, got value {event_header}"
+            "status": f"X-GitHub-Event header was not set to a valid event, got value {event_header}"
         }
-
-    ref = payload.get("ref", "")
-    branch = ref.split("/")[-1]
+    
     repo_name = payload.get("repository", {}).get("name")
-
     key = (repo_name, branch)
 
     if args.development and key not in config:
         # if we are in development mode, pretend that
         # we wanted to watch this repo no matter what
-        config[key] = RepoToWatch(name=repo_name, branch=branch, path="/dev/null")
+        config[key] = RepoToWatch(name=repo_name, branch=branch, path="/dev/null", actions_need_to_pass=actions_need_to_pass)
 
     if key not in config:
         logging.warning(f"not acting on repo and branch name of {key}")
@@ -223,6 +238,8 @@ def get_metrics():
 def read_root():
     return {"message": "SCE CICD Server"}
 
+def check_actions_passed():
+    pass
 
 def start_smee():
     try:
