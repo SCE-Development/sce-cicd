@@ -6,7 +6,7 @@ import os
 import socket
 import subprocess
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import requests
 import uvicorn
@@ -37,6 +37,9 @@ class RepoConfig:
     name: str
     branch: str
     path: str
+    # list of all the containers
+    # makes sure theres a new list made for each repotowatch object
+    containers_to_force_recreate: List[str] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -57,6 +60,7 @@ class DeploymentStatus:
     author: str = "author not set"
     git_execution_result: Optional[ExecutionResult] = None
     docker_execution_result: Optional[ExecutionResult] = None
+    docker_force_execution_result: Optional[ExecutionResult] = None
     is_dev: bool = False
 
 
@@ -130,13 +134,14 @@ def send_notification(status: DeploymentStatus):
     for execution_result in [
         status.git_execution_result,
         status.docker_execution_result,
+        status.docker_force_execution_result,
     ]:
         if not execution_result:
             continue
         icon = "✅" if execution_result.success else "⚠️"
         description += f"\n{icon} `{execution_result.command}` (Exit: {execution_result.exit_code})"
         if execution_result.stderr:
-            description += f"\n```stderr\n{execution_result.stderr[:250]}```"
+            description += f"\n```stderr\n{execution_result.stderr}```"
 
     payload = {"embeds": [{"title": title, "description": description, "color": color}]}
     try:
@@ -179,6 +184,11 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
         ["docker-compose", "up", "--build", "-d"], repo_cfg.path
     )
 
+    if repo_cfg.containers_to_force_recreate:
+        command = ["docker-compose", "up", "--build", "-d", "--force-recreate", "--no-deps"]
+        command.extend(repo_cfg.containers_to_force_recreate)
+        status.docker_force_execution_result = run_command(command, repo_cfg.path)
+
     send_notification(status)
 
 
@@ -190,12 +200,17 @@ app.add_middleware(
 args = get_args()
 REPO_MAP: Dict[Tuple[str, str], RepoConfig] = {}
 
-# Load config once at startup
+# dis one loads the config.yml file
+# turns it into a dictionary
+# result is the dictionary
 try:
     if not args.development:
-        with open(f"{args.config}") as f:
+        with open(args.config) as f:
             raw_repos = yaml.safe_load(f).get("repos", [])
             for r in raw_repos:
+                # make a new entry into the result dictionary
+                # the key is a tuple of the repo name and branch
+                # the value is a RepoToWatch object
                 cfg = RepoConfig(**r)
                 REPO_MAP[(cfg.name, cfg.branch)] = cfg
 except Exception:
