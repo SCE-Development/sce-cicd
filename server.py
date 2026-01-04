@@ -125,7 +125,10 @@ def push_update_success_as_discord_embed(
     hostname_env = socket.gethostname()
 
     # Title
-    title = "Deployment successful"
+    if hasattr(result, 'rollback_message') and result.rollback_message:
+        title = "Deployment Failed"
+    else:
+        title = "Deployment Successful"
     # Description: 
     repo_branch_line = f"[{repo_config.name}:{branch}]"
     commit_line = f"[{commit_id}]({commit_url}) — {commit_message}"
