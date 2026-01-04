@@ -6,7 +6,6 @@ import logging
 import os
 import subprocess
 import threading
-import datetime
 
 from dotenv import load_dotenv
 import uvicorn
