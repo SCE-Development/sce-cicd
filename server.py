@@ -6,6 +6,7 @@ import logging
 import os
 import subprocess
 import threading
+import datetime
 
 from dotenv import load_dotenv
 import uvicorn
@@ -57,7 +58,6 @@ class RepoToWatch:
     name: str
     branch: str
     path: str
-    force_recreate: bool = False
     enable_rollback: bool = False
 
 
@@ -80,8 +80,6 @@ def load_config(development: bool):
     with open("config.yml") as f:
         loaded_yaml = yaml.safe_load(f)
         for config in loaded_yaml.get("repos", []):
-            if 'enable_rollback' not in config:
-                config['enable_rollback'] = False
             parsed = RepoToWatch(**config)
             result[(parsed.name, parsed.branch)] = parsed
 
@@ -145,31 +143,66 @@ def push_update_success_as_discord_embed(
     except Exception:
         logger.exception("push_update_success_as_discord_embed had a bad time")
 
-
+def create_copy_of_cicd_branch(repo_config):
+    copy_branch_name = datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + f'-{repo_config.branch}'
+    try:
+        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
+        subprocess.run(["git", "checkout", "-b", copy_branch_name], cwd=repo_config.path, check=True)
+        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
+        logger.info(f"Created backup branch {copy_branch_name} for rollback protection.")
+        return copy_branch_name
+    except Exception as e:
+        logger.error(f"Failed to create backup branch {copy_branch_name}: {e}")
+        return None
+def do_rollback(repo_config, copy_branch_name, result):
+    rollback_success = False
+    rollback_error = None
+    try:
+        # Reset main to backup branch
+        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
+        subprocess.run(["git", "reset", "--hard", copy_branch_name], cwd=repo_config.path, check=True)
+        # Delete backup branch
+        subprocess.run(["git", "branch", "-D", copy_branch_name], cwd=repo_config.path, check=True)
+        logger.info(f"Rolled back {repo_config.branch} to {copy_branch_name} and deleted backup branch.")
+        rollback_success = True
+    except Exception as e:
+        logger.error(f"Rollback failed: {e}")
+        rollback_error = str(e)
+    result.git_exit_code = 1
+    result.docker_exit_code = 1
+    if rollback_success:
+        result.rollback_message = f"Deployment failed, rollback performed using backup branch {copy_branch_name}."
+        # Retry docker-compose up after rollback
+        try:
+            retry_result = subprocess.run(
+                ["docker-compose", "up", "--build", "-d"],
+                cwd=repo_config.path,
+                capture_output=True,
+                text=True,
+            )
+            logger.info(f"Docker compose retry stdout: {retry_result.stdout}")
+            logger.info(f"Docker compose retry stderr: {retry_result.stderr}")
+            result.docker_stdout += f"\n[rollback retry]\n{retry_result.stdout}"
+            result.docker_stderr += f"\n[rollback retry]\n{retry_result.stderr}"
+            result.docker_exit_code = retry_result.returncode
+        except Exception as e:
+            logger.error(f"Retry after rollback failed: {e}")
+    else:
+        result.rollback_message = f"Deployment failed, rollback logic triggered but failed: {rollback_error or 'No backup branch.'}"
+    push_update_success_as_discord_embed(repo_config, result)
+    return result
+        
 def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
     )
-
     result = RepoUpdateResult(commit=commit_obj, author=author_obj)
-    backup_branch_name = None
+    copy_branch_name = None
     # Backup branch logic
     if getattr(repo_config, 'enable_rollback', False):
-        from datetime import datetime
-        backup_branch_name = datetime.now().strftime('%Y%m%d-%H%M%S') + f'-{repo_config.branch}'
-        try:
-            # double check if on the main branch
-            subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
-            # create backup branch
-            subprocess.run(["git", "checkout", "-b", backup_branch_name], cwd=repo_config.path, check=True)
-            # switch back to main
-            subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
-            logger.info(f"Created backup branch {backup_branch_name} for rollback protection.")
-        except Exception as e:
-            logger.error(f"Failed to create backup branch {backup_branch_name}: {e}")
-            result.rollback_message = f"Failed to create backup branch: {e}"
-        result.backup_branch_name = backup_branch_name
+        copy_branch_name = create_copy_of_cicd_branch(repo_config)
+        result.copy_branch_name = copy_branch_name
 
     if args.development:
         logging.warning("skipping command to update, we are in development mode")
@@ -200,55 +233,14 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
         result.docker_stderr = docker_result.stderr
         result.docker_exit_code = docker_result.returncode
         # rollback command for terminal
-        if docker_result.returncode != 0:
-            logger.warning("\nROLLBACK INITIATED\n")
-            logger.warning(f"docker-compose failed (exit code {docker_result.returncode}), git pull exit code {git_result.returncode}.")
-            rollback_success = False
-            rollback_error = None
-            if getattr(repo_config, 'enable_rollback', False) and hasattr(result, 'backup_branch_name') and result.backup_branch_name:
-                try:
-                    #reset main to backup branch
-                    subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
-                    subprocess.run(["git", "reset", "--hard", result.backup_branch_name], cwd=repo_config.path, check=True)
-                    #delete backup branch
-                    subprocess.run(["git", "branch", "-D", result.backup_branch_name], cwd=repo_config.path, check=True)
-                    logger.info(f"Rolled back {repo_config.branch} to {result.backup_branch_name} and deleted backup branch.")
-                    rollback_success = True
-                except Exception as e:
-                    logger.error(f"Rollback failed: {e}")
-                    rollback_error = str(e)
-            else:
-                logger.warning("Rollback skipped: no backup branch available.")
-            logger.warning("\nROLLBACK COMPLETE\n")
-            result.git_exit_code = 1
-            result.docker_exit_code = 1
-            if rollback_success:
-                result.rollback_message = f"Deployment failed, rollback performed using backup branch {getattr(result, 'backup_branch_name', '')}."
-                # Retry docker-compose up after rollback
-                try:
-                    retry_result = subprocess.run(
-                        ["docker-compose", "up", "--build", "-d"],
-                        cwd=repo_config.path,
-                        capture_output=True,
-                        text=True,
-                    )
-                    logger.info(f"Docker compose retry stdout: {retry_result.stdout}")
-                    logger.info(f"Docker compose retry stderr: {retry_result.stderr}")
-                    result.docker_stdout += f"\n[rollback retry]\n{retry_result.stdout}"
-                    result.docker_stderr += f"\n[rollback retry]\n{retry_result.stderr}"
-                    result.docker_exit_code = retry_result.returncode
-                except Exception as e:
-                    logger.error(f"Retry after rollback failed: {e}")
-            else:
-                result.rollback_message = f"Deployment failed, rollback logic triggered but failed: {rollback_error or 'No backup branch.'}"
-            push_update_success_as_discord_embed(repo_config, result)
-            return result
-        if getattr(repo_config, 'enable_rollback', False) and hasattr(result, 'backup_branch_name') and result.backup_branch_name:
+        if docker_result.returncode != 0 and repo_config.enable_rollback:
+            return do_rollback(repo_config, copy_branch_name, result)
+        if repo_config.enable_rollback and copy_branch_name:
             try:
-                subprocess.run(["git", "branch", "-D", result.backup_branch_name], cwd=repo_config.path, check=True)
-                logger.info(f"Deleted backup branch {result.backup_branch_name} after successful deployment.")
+                subprocess.run(["git", "branch", "-D", copy_branch_name], cwd=repo_config.path, check=True)
+                logger.info(f"Deleted backup branch {copy_branch_name} after successful deployment.")
             except Exception as e:
-                logger.error(f"Failed to delete backup branch {result.backup_branch_name}: {e}")
+                logger.error(f"Failed to delete backup branch {copy_branch_name}: {e}")
         push_update_success_as_discord_embed(repo_config, result)
     except Exception:
         logger.exception("update_repo had a bad time")
