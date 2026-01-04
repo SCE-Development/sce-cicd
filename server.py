@@ -180,7 +180,6 @@ async def github_webhook(request: Request):
     MetricsHandler.last_smee_request_timestamp.set(time.time())
     payload_body = await request.body()
     payload = json.loads(payload_body)
-    print("Payload:", payload)  # simpler
 
     event_header = request.headers.get("X-GitHub-Event")
     
