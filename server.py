@@ -61,7 +61,9 @@ class RepoUpdateResult:
     docker_stdout: str = ""
     docker_stderr: str = ""
 
-
+# dis one loads the config.yml file
+# turns it into a dictionary
+# result is the dictionary
 def load_config(development: bool):
     result = {}
     if development:
@@ -71,7 +73,6 @@ def load_config(development: bool):
         for config in loaded_yaml.get("repos", []):
             parsed = RepoToWatch(**config)
             result[(parsed.name, parsed.branch)] = parsed
-
     return result
 
 
@@ -84,7 +85,22 @@ def get_args():
 args = get_args()
 
 config = load_config(args.development)
+# now we must get the list of containers that need to be recreated
+# we look into the config.yml file
 
+# twan idk man lets just make a method to get the docker containers
+# from the config.yml file
+# lets just make it similar to the load_config
+def load_containers(development: bool):
+    if development:
+        return []
+    with open("config.yml") as f:
+        loaded_yaml = yaml.safe_load(f)
+        # if the dictionary config does not contain a force_recreate key
+        # then we just get an empty list
+        containers_to_force_recreate = loaded_yaml.get("force_recreate", [])
+    return containers_to_force_recreate
+force_recreate = load_containers(args.development)
 
 def push_update_success_as_discord_embed(
     repo_config: RepoToWatch, result: RepoUpdateResult
@@ -158,8 +174,23 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
         result.git_stderr = git_result.stderr
         result.git_exit_code = git_result.returncode
 
+        # if the list containing the containers we want to force recreate
+        # is empty, then we dont need to do anything to the docker command
+        # but if the list contains stuff
+        # then we have to change the docker command
+
+        docker_command = ["docker-compose", "up", "--build", "-d"]
+        if force_recreate:
+            docker_command.extend(["--force-recreate", "--no-deps"])
+            # go through the list force_recreate
+            # add each container to the docker command list
+            for container in force_recreate:
+                docker_command.append(container)
+
+        # subprocess.run executes commands like in the terminal iirc
+        # this one runs the docker
         docker_result = subprocess.run(
-            ["docker-compose", "up", "--build", "-d"],
+            docker_command,
             cwd=repo_config.path,
             capture_output=True,
             text=True,
