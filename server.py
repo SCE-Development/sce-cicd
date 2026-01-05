@@ -151,8 +151,8 @@ def create_copy_of_cicd_branch(repo_config):
         subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
         logger.info(f"Created backup branch {copy_branch_name} for rollback protection.")
         return copy_branch_name
-    except Exception as e:
-        logger.error(f"Failed to create backup branch {copy_branch_name}: {e}")
+    except Exception:
+        logger.exception("Failed to create backup branch {copy_branch_name}")
         return None
 def do_rollback(repo_config, copy_branch_name, result):
     rollback_success = False
