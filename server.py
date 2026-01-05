@@ -49,12 +49,25 @@ class RepoConfig:
 
 
 @dataclasses.dataclass
+<<<<<<< HEAD
 class ExecutionResult:
     command: str
     exit_code: int = 1
     stdout: str = ""
     stderr: str = ""
     success: bool = False
+=======
+class RepoUpdateResult:
+    git_exit_code: int = 0
+    docker_exit_code: int = 0
+    development: bool = False
+    git_stdout: str = ""
+    git_stderr: str = ""
+    docker_stdout: str = ""
+    docker_stderr: str = ""
+    development: bool = False
+    maybe_rollback_result: bool | None = None
+>>>>>>> 4690508 (Add maybe_rollback_result to server.py)
 
 
 @dataclasses.dataclass
@@ -241,6 +254,7 @@ def push_skipped_update_as_discord_embed_mismatched_branch(
     repo_config: RepoConfig, incoming_branch: str, local_branch: str
 ):
     repo_name = repo_config.name
+<<<<<<< HEAD
     # Yellow warning color
     color = 0xFFFF00 
     
@@ -253,6 +267,21 @@ def push_skipped_update_as_discord_embed_mismatched_branch(
         f"**Path:** `{repo_config.path}`\n"
         f"**Host:** `{env_str}`"
     )
+=======
+    # default green
+    color = 0x57F287
+    if result.development:
+        prefix = "[development mode]"
+        repo_name = prefix + " " + repo_name
+        # do a gray color if we are sending "not real" embeds
+        color = 0x99AAB5
+    if hasattr(result, 'maybe_rollback_result') and result.maybe_rollback_result is not None:
+        description_list.append("")
+        if result.maybe_rollback_result:
+            description_list.append("**Rollback status:** :white_check_mark: Rollback was attempted and succeeded.")
+        else:
+            description_list.append("**Rollback status:** :x: Rollback was attempted but failed.")
+>>>>>>> 4690508 (Add maybe_rollback_result to server.py)
 
     embed_json = {
         "embeds": [
@@ -279,6 +308,7 @@ def push_skipped_update_as_discord_embed_mismatched_branch(
     except Exception:
         logger.exception("Failed to send mismatch notification to Discord")
 
+<<<<<<< HEAD
 
 def push_skipped_update_as_discord_embed_docker_ignore(repo_cfg: RepoConfig, files_changed: List[str]):
     webhook_url = os.getenv("CICD_DISCORD_WEBHOOK_URL")
@@ -303,6 +333,59 @@ def push_skipped_update_as_discord_embed_docker_ignore(repo_cfg: RepoConfig, fil
         f"**Matched Patterns:** {patterns_display}\n"
         f"**Files Changed:**\n```\n{files_display}\n```\n"
         f"**Host:** `{env_str}`"
+=======
+def create_copy_of_cicd_branch(repo_config):
+    copy_branch_name = datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + f'-{repo_config.branch}'
+    try:
+        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
+        subprocess.run(["git", "checkout", "-b", copy_branch_name], cwd=repo_config.path, check=True)
+        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
+        logger.info(f"Created backup branch {copy_branch_name} for rollback protection.")
+        return copy_branch_name
+    except Exception:
+        logger.exception("Failed to create backup branch {copy_branch_name}")
+        return None
+def do_rollback(repo_config, copy_branch_name):
+    try:
+        # Reset main to backup branch
+        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
+        subprocess.run(["git", "reset", "--hard", copy_branch_name], cwd=repo_config.path, check=True)
+        # Delete backup branch
+        subprocess.run(["git", "branch", "-D", copy_branch_name], cwd=repo_config.path, check=True)
+        logger.info(f"Rolled back {repo_config.branch} to {copy_branch_name} and deleted backup branch.")
+        rollback_success = True
+    except Exception as e:
+        logger.error(f"Rollback failed: {e}")
+        rollback_error = str(e)
+    result.git_exit_code = 1
+    result.docker_exit_code = 1
+    if rollback_success:
+        result.rollback_message = f"Deployment failed, rollback performed using backup branch {copy_branch_name}."
+        # Retry docker-compose up after rollback
+        try:
+            retry_result = subprocess.run(
+                ["docker-compose", "up", "--build", "-d"],
+                cwd=repo_config.path,
+                capture_output=True,
+                text=True,
+            )
+            logger.info(f"Docker compose retry stdout: {retry_result.stdout}")
+            logger.info(f"Docker compose retry stderr: {retry_result.stderr}")
+            result.docker_stdout += f"\n[rollback retry]\n{retry_result.stdout}"
+            result.docker_stderr += f"\n[rollback retry]\n{retry_result.stderr}"
+            result.docker_exit_code = retry_result.returncode
+        except Exception as e:
+            logger.error(f"Retry after rollback failed: {e}")
+    else:
+        result.rollback_message = f"Deployment failed, rollback logic triggered but failed: {rollback_error or 'No backup branch.'}"
+    push_update_success_as_discord_embed(repo_config, result)
+    return result
+        
+def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
+    MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
+    logger.info(
+        f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
+>>>>>>> 4690508 (Add maybe_rollback_result to server.py)
     )
 
     payload = {
