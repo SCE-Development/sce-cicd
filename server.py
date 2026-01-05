@@ -15,7 +15,6 @@ import requests
 import time
 from metrics import MetricsHandler
 from typing import List
-from dataclasses import field
 
 
 from prometheus_client import generate_latest
@@ -51,7 +50,9 @@ class RepoToWatch:
     name: str
     branch: str
     path: str
-    containers: List[str] = field(default_factory=list)
+    # list of all the containers
+    # makes sure theres a new list made for each repotowatch object
+    containers: List[str] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
