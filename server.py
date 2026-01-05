@@ -14,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import time
 from metrics import MetricsHandler
+from typing import List
+from dataclasses import field
 
 
 from prometheus_client import generate_latest
@@ -49,6 +51,7 @@ class RepoToWatch:
     name: str
     branch: str
     path: str
+    containers: List[str] = field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -70,7 +73,11 @@ def load_config(development: bool):
         return result
     with open("config.yml") as f:
         loaded_yaml = yaml.safe_load(f)
+        # for each repo in the config
         for config in loaded_yaml.get("repos", []):
+            # make a new entry into the result dictionary
+            # the key is a tuple of the repo name and branch
+            # the value is a RepoToWatch object
             parsed = RepoToWatch(**config)
             result[(parsed.name, parsed.branch)] = parsed
     return result
@@ -91,16 +98,16 @@ config = load_config(args.development)
 # twan idk man lets just make a method to get the docker containers
 # from the config.yml file
 # lets just make it similar to the load_config
-def load_containers(development: bool):
-    if development:
-        return []
-    with open("config.yml") as f:
-        loaded_yaml = yaml.safe_load(f)
-        # if the dictionary config does not contain a force_recreate key
-        # then we just get an empty list
-        containers_to_force_recreate = loaded_yaml.get("force_recreate", [])
-    return containers_to_force_recreate
-force_recreate = load_containers(args.development)
+# def load_containers(development: bool):
+#     if development:
+#         return []
+#     with open("config.yml") as f:
+#         loaded_yaml = yaml.safe_load(f)
+#         # if the dictionary config does not contain a force_recreate key
+#         # then we just get an empty list
+#         containers_to_force_recreate = loaded_yaml.get("force_recreate", [])
+#     return containers_to_force_recreate
+# force_recreate = load_containers(args.development)
 
 def push_update_success_as_discord_embed(
     repo_config: RepoToWatch, result: RepoUpdateResult
@@ -180,6 +187,7 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
         # then we have to change the docker command
 
         docker_command = ["docker-compose", "up", "--build", "-d"]
+        force_recreate = repo_config.containers
         if force_recreate:
             docker_command.extend(["--force-recreate", "--no-deps"])
             # go through the list force_recreate
