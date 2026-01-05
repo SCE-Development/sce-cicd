@@ -315,7 +315,42 @@ def push_skipped_update_as_discord_embed_docker_ignore(repo_cfg: RepoConfig, fil
     }
 
     try:
+<<<<<<< HEAD
         requests.post(webhook_url, json=payload, timeout=10)
+=======
+        git_result = subprocess.run(
+            ["git", "pull", "origin", repo_config.branch],
+            cwd=repo_config.path,
+            capture_output=True,
+            text=True,
+        )
+        logger.info(f"Git pull stdout: {git_result.stdout}")
+        logger.info(f"Git pull stderr: {git_result.stderr}")
+        result.git_stdout = git_result.stdout
+        result.git_stderr = git_result.stderr
+        result.git_exit_code = git_result.returncode
+
+        docker_result = subprocess.run(
+            ["docker-compose", "up", "--build", "-d"],
+            cwd=repo_config.path,
+            capture_output=True,
+            text=True,
+        )
+        logger.info(f"Docker compose stdout: {docker_result.stdout}")
+        logger.info(f"Docker compose stderr: {docker_result.stderr}")
+        result.docker_stdout = docker_result.stdout
+        result.docker_stderr = docker_result.stderr
+        result.docker_exit_code = docker_result.returncode
+        # rollback command for terminal
+        if docker_result.returncode != 0 and repo_config.enable_rollback:
+            rollback_worked = do_rollback(repo_config, copy_branch_name, result)
+            try:
+                subprocess.run(["git", "branch", "-D", copy_branch_name], cwd=repo_config.path, check=True)
+                logger.info(f"Deleted backup branch {copy_branch_name} after successful deployment.")
+            except Exception as e:
+                logger.error(f"Failed to delete backup branch {copy_branch_name}: {e}")
+        push_update_success_as_discord_embed(repo_config, result)
+>>>>>>> d767205 (fixed code to assume that copy_branch_name is set)
     except Exception:
         logger.exception("Failed to send skip notification")
 
