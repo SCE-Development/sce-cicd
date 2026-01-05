@@ -234,8 +234,7 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
         result.docker_exit_code = docker_result.returncode
         # rollback command for terminal
         if docker_result.returncode != 0 and repo_config.enable_rollback:
-            return do_rollback(repo_config, copy_branch_name, result)
-        if repo_config.enable_rollback and copy_branch_name:
+            rollback_worked = do_rollback(repo_config, copy_branch_name, result)
             try:
                 subprocess.run(["git", "branch", "-D", copy_branch_name], cwd=repo_config.path, check=True)
                 logger.info(f"Deleted backup branch {copy_branch_name} after successful deployment.")
