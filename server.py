@@ -109,7 +109,7 @@ def push_update_success_as_discord_embed(
         repo_name = prefix + " " + repo_name
         # do a gray color if we are sending "not real" embeds
         color = 0x99AAB5
-    if hasattr(result, 'maybe_rollback_result') and result.maybe_rollback_result is not None:
+    if result.maybe_rollback_result is not None:
         description_list.append("")
         if result.maybe_rollback_result:
             description_list.append("**Rollback status:** :white_check_mark: Rollback was attempted and succeeded.")
