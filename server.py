@@ -407,8 +407,8 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
             try:
                 subprocess.run(["git", "branch", "-D", copy_branch_name], cwd=repo_config.path, check=True)
                 logger.info(f"Deleted backup branch {copy_branch_name} after successful deployment.")
-            except Exception as e:
-                logger.error(f"Failed to delete backup branch {copy_branch_name}: {e}")
+            except Exception:
+                logger.error(f"Failed to delete backup branch {copy_branch_name}:")
         push_update_success_as_discord_embed(repo_config, result)
 >>>>>>> d767205 (fixed code to assume that copy_branch_name is set)
     except Exception:
