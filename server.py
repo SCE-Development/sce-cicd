@@ -14,9 +14,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import time
 from metrics import MetricsHandler
-
+from collections import defaultdict
 
 from prometheus_client import generate_latest
+pending_commits = defaultdict(set)
 
 
 load_dotenv()
@@ -180,23 +181,32 @@ async def github_webhook(request: Request):
     MetricsHandler.last_smee_request_timestamp.set(time.time())
     payload_body = await request.body()
     payload = json.loads(payload_body)
-
+    head_sha = payload.get("head_sha")
     event_header = request.headers.get("X-GitHub-Event")
-    
-    # check if commit on branch passed actions based on type of event
+
     actions_need_to_pass = False
+    repo_name = payload.get("repository", {}).get("name")
     if event_header == "push":
-        ref = payload.get("ref", "")
-        branch = ref.split("/")[-1]
+        pending_commits[repo_name].add(head_sha)
+        logger.info(f"Stored {head_sha} for {repo_name}")
+        return {
+            "status": f"commit recorded"
+        }
     elif event_header == "workflow_run":
         workflow_run = payload.get("workflow_run", {})
         status = workflow_run.get("status")
         conclusion = workflow_run.get("conclusion")
-        branch = workflow_run.get("head_branch")
+        head_sha = payload.get("head_sha", {}).get("id")
 
-        if status == "completed" and conclusion == "success": 
-            actions_need_to_pass = True
-        else: 
+        if not head_sha or not repo_name:
+            return {"status": "missing head_sha or repo name"}
+    
+        if head_sha not in pending_commits:
+            return {
+                "status": f"Not in pending_commits"
+            } 
+        
+        if status != "completed" or conclusion != "success": 
             return {
                 "status": f"Committed changes did not pass requirements. Status: {status}"
             }
@@ -204,8 +214,12 @@ async def github_webhook(request: Request):
         return {
             "status": f"X-GitHub-Event header was not set to a valid event, got value {event_header}"
         }
+
+    actions_need_to_pass = True
+    pending_commits[repo_name].discard(head_sha)
     
-    repo_name = payload.get("repository", {}).get("name")
+    ref = payload.get("ref", "")
+    branch = ref.split("/")[-1]
     key = (repo_name, branch)
 
     if args.development and key not in config:
