@@ -181,14 +181,20 @@ async def github_webhook(request: Request):
     MetricsHandler.last_smee_request_timestamp.set(time.time())
     payload_body = await request.body()
     payload = json.loads(payload_body)
-    head_sha = payload.get("head_sha")
     event_header = request.headers.get("X-GitHub-Event")
-
-    actions_need_to_pass = False
     repo_name = payload.get("repository", {}).get("name")
+    actions_need_to_pass = False
+
+    if (not repo_name):
+        return {"status": "missing repo name"}
+
     if event_header == "push":
-        pending_commits[repo_name].add(head_sha)
-        logger.info(f"Stored {head_sha} for {repo_name}")
+        head_commit = payload.get("head_commit", {}).get("id")
+        if not head_commit:
+            return {"status": "missing head_commit"}
+        pending_commits[repo_name].add(head_commit)
+        logger.info(f"Stored {head_commit} for {repo_name}")
+        
         return {
             "status": f"commit recorded"
         }
@@ -196,12 +202,10 @@ async def github_webhook(request: Request):
         workflow_run = payload.get("workflow_run", {})
         status = workflow_run.get("status")
         conclusion = workflow_run.get("conclusion")
-        head_sha = payload.get("head_sha", {}).get("id")
-
-        if not head_sha or not repo_name:
-            return {"status": "missing head_sha or repo name"}
-    
-        if head_sha not in pending_commits:
+        head_commit = workflow_run.get("head_commit", {}).get("id")
+        branch = workflow_run.get("head_branch")
+        
+        if head_commit not in pending_commits.get(repo_name, set()):
             return {
                 "status": f"Not in pending_commits"
             } 
@@ -210,34 +214,39 @@ async def github_webhook(request: Request):
             return {
                 "status": f"Committed changes did not pass requirements. Status: {status}"
             }
+        
+        actions_need_to_pass = True
+        commits = pending_commits.get(repo_name)
+        if commits:
+            pending_commits[repo_name].discard(head_commit)
+        
+        # check for any empty repos
+        if not commits:
+            pending_commits.pop(repo_name)
+        
+        ref = payload.get("ref", "")
+        branch = ref.split("/")[-1]
+        key = (repo_name, branch)
+
+        if args.development and key not in config:
+            # if we are in development mode, pretend that
+            # we wanted to watch this repo no matter what
+            config[key] = RepoToWatch(name=repo_name, branch=branch, path="/dev/null", actions_need_to_pass=actions_need_to_pass)
+
+        if key not in config:
+            logging.warning(f"not acting on repo and branch name of {key}")
+            return {"status": f"not acting on repo and branch name of {key}"}
+        
+        logger.info(f"Push to {branch} detected for {repo_name}")
+        # update the repo
+        thread = threading.Thread(target=update_repo, args=(config[key],))
+        thread.start()
+
+        return {"status": "webhook received"}
     else: 
         return {
             "status": f"X-GitHub-Event header was not set to a valid event, got value {event_header}"
         }
-
-    actions_need_to_pass = True
-    pending_commits[repo_name].discard(head_sha)
-    
-    ref = payload.get("ref", "")
-    branch = ref.split("/")[-1]
-    key = (repo_name, branch)
-
-    if args.development and key not in config:
-        # if we are in development mode, pretend that
-        # we wanted to watch this repo no matter what
-        config[key] = RepoToWatch(name=repo_name, branch=branch, path="/dev/null", actions_need_to_pass=actions_need_to_pass)
-
-    if key not in config:
-        logging.warning(f"not acting on repo and branch name of {key}")
-        return {"status": f"not acting on repo and branch name of {key}"}
-
-    logger.info(f"Push to {branch} detected for {repo_name}")
-    # update the repo
-    thread = threading.Thread(target=update_repo, args=(config[key],))
-    thread.start()
-
-    return {"status": "webhook received"}
-
 
 @app.get("/metrics")
 def get_metrics():
