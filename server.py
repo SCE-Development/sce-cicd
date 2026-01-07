@@ -14,8 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import time
 from metrics import MetricsHandler
-
-
+from prometheus_client import Gauge
 from prometheus_client import generate_latest
 
 
@@ -133,9 +132,7 @@ def push_update_success_as_discord_embed(
         logger.exception("push_update_success_as_discord_embed had a bad time")
 
 def get_docker_images_disk_usage_bytes():
-    """
-    Returns the total disk usage of all Docker images in bytes.
-    """
+    # returns total disk usage of all docker images in bytes
     try:
         cmd = [
             "sh", "-c",
@@ -147,6 +144,10 @@ def get_docker_images_disk_usage_bytes():
     except Exception as e:
         print(f"Error getting Docker image disk usage: {e}")
         return None
+docker_image_disk_usage_bytes = Gauge(
+    "docker_image_disk_usage_bytes",
+    "Total disk usage of all Docker images in bytes"
+)
 def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
@@ -226,6 +227,9 @@ async def github_webhook(request: Request):
 
 @app.get("/metrics")
 def get_metrics():
+    usage = get_docker_images_disk_usage_bytes()
+    if usage is not None:
+        docker_image_disk_usage_bytes.set(usage)
     return Response(
         media_type="text/plain",
         content=generate_latest(),
