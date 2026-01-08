@@ -131,7 +131,7 @@ def get_docker_images_disk_usage_bytes():
     try:
         cmd = [
             "sh", "-c",
-            "docker images --format '{{.Size}}' | awk '/GB/ {gsub(\"GB\",\"\"); sum+=($1*1024*1024*1024)} /MB/ {gsub(\"MB\",\"\"); sum+=($1*1024*1024)} /kB/ {gsub(\"kB\",\"\"); sum+=($1*1024)} END {print sum}'"
+            'docker images --format "{{.Size}}" | awk \'/GB/ {gsub("GB", ""); sum+=($1*1024*1024*1024)} /MB/ {gsub("MB", ""); sum+=($1*1024*1024)} /kB/ {gsub("kB", ""); sum+=($1*1024)} END {print int(sum)}\''
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         output = result.stdout.strip()
