@@ -131,7 +131,21 @@ def push_update_success_as_discord_embed(
         )
     except Exception:
         logger.exception("push_update_success_as_discord_embed had a bad time")
-
+        def get_docker_images_disk_usage_bytes():
+    """
+    Returns the total disk usage of all Docker images in bytes.
+    """
+    try:
+        cmd = [
+            "sh", "-c",
+            "docker images --format '{{.Size}}' | awk '/GB/ {gsub(\"GB\",\"\"); sum+=($1*1024*1024*1024)} /MB/ {gsub(\"MB\",\"\"); sum+=($1*1024*1024)} /kB/ {gsub(\"kB\",\"\"); sum+=($1*1024)} END {print sum}'"
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        output = result.stdout.strip()
+        return int(float(output))
+    except Exception as e:
+        print(f"Error getting Docker image disk usage: {e}")
+        return None
 
 def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
