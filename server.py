@@ -1,10 +1,10 @@
-import argparse
 import dataclasses
 import json
 import logging
 import os
 import subprocess
 import threading
+from typing import Optional
 
 from dotenv import load_dotenv
 import uvicorn
@@ -60,16 +60,19 @@ class RepoUpdateResult:
     git_stderr: str = ""
     docker_stdout: str = ""
     docker_stderr: str = ""
+    maybe_rollback_result: Optional[bool] = None
 
 
-def load_config(development: bool):
+def load_config():
     result = {}
     if development:
         return result
     with open("config.yml") as f:
         loaded_yaml = yaml.safe_load(f)
         for config in loaded_yaml.get("repos", []):
-            parsed = RepoToWatch(**config)
+            allowed = {k: v for k, v in config.items() if k in RepoToWatch.__dataclass_fields__}
+
+            parsed = RepoToWatch(**allowed)
             result[(parsed.name, parsed.branch)] = parsed
 
     return result
@@ -79,7 +82,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--development", action="store_true")
     return parser.parse_args()
-
+config = load_config()
 
 args = get_args()
 
@@ -192,11 +195,6 @@ async def github_webhook(request: Request):
     repo_name = payload.get("repository", {}).get("name")
 
     key = (repo_name, branch)
-
-    if args.development and key not in config:
-        # if we are in development mode, pretend that
-        # we wanted to watch this repo no matter what
-        config[key] = RepoToWatch(name=repo_name, branch=branch, path="/dev/null")
 
     if key not in config:
         logging.warning(f"not acting on repo and branch name of {key}")
