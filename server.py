@@ -18,10 +18,6 @@ from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from metrics import MetricsHandler
-<<<<<<< HEAD
-=======
-from prometheus_client import Gauge
->>>>>>> 67e6f7a (add Prometheus metric for Docker image disk usage)
 from prometheus_client import generate_latest
 
 load_dotenv()
@@ -275,50 +271,6 @@ def get_docker_images_disk_usage_bytes():
             return int(float(number) * multiplier)
 
         return None
-<<<<<<< HEAD
-=======
-    docker_image_disk_usage_bytes = Gauge(
-    "docker_image_disk_usage_bytes",
-    "Total disk usage of all Docker images in bytes"
-)
-def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
-    MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
-    logger.info(
-        f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
-    )
-
-    result = RepoUpdateResult()
-
-    if args.development:
-        logging.warning("skipping command to update, we are in development mode")
-        result.development = True
-        return push_update_success_as_discord_embed(repo_config, result)
-    try:
-        git_result = subprocess.run(
-            ["git", "pull", "origin", repo_config.branch],
-            cwd=repo_config.path,
-            capture_output=True,
-            text=True,
-        )
-        logger.info(f"Git pull stdout: {git_result.stdout}")
-        logger.info(f"Git pull stderr: {git_result.stderr}")
-        result.git_stdout = git_result.stdout
-        result.git_stderr = git_result.stderr
-        result.git_exit_code = git_result.returncode
-
-        docker_result = subprocess.run(
-            ["docker-compose", "up", "--build", "-d"],
-            cwd=repo_config.path,
-            capture_output=True,
-            text=True,
-        )
-        logger.info(f"Docker compose stdout: {docker_result.stdout}")
-        logger.info(f"Docker compose stdout: {docker_result.stderr}")
-        result.docker_stdout = docker_result.stdout
-        result.docker_stderr = docker_result.stderr
-        result.git_exit_code = git_result.returncode
-        push_update_success_as_discord_embed(repo_config, result)
->>>>>>> 67e6f7a (add Prometheus metric for Docker image disk usage)
     except Exception:
         logger.exception("Error getting Docker image disk usage")
 
@@ -388,17 +340,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
 
 @app.get("/metrics")
 def get_metrics():
-<<<<<<< HEAD
     return Response(media_type="text/plain", content=generate_latest())
-=======
-    usage = get_docker_images_disk_usage_bytes()
-    if usage is not None:
-        docker_image_disk_usage_bytes.set(usage)
-    return Response(
-        media_type="text/plain",
-        content=generate_latest(),
-    )
->>>>>>> 67e6f7a (add Prometheus metric for Docker image disk usage)
 
 
 @app.get("/")
