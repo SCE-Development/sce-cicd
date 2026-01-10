@@ -141,7 +141,7 @@ def get_docker_images_disk_usage_bytes():
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         output = result.stdout.strip()
-        return int(float(output))
+        return int(output)
     except Exception:
         logging.exception("Error getting Docker image disk usage:")
         return None
