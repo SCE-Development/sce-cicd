@@ -132,6 +132,41 @@ def push_update_success_as_discord_embed(
     except Exception:
         logger.exception("push_update_success_as_discord_embed had a bad time")
 
+def push_skipped_update_as_discord_embed(
+    repo_config: RepoToWatch, current_branch: str, development: bool
+):
+    repo_name = repo_config.name
+    color = 0xFFFF00
+    if development:
+        prefix = "[development mode]"
+        repo_name = prefix + " " + repo_name
+        color = 0x99AAB5
+
+    embed_json = {
+        "embeds": [
+            {
+                "title": f"{repo_name} update skipped due to branch mismatch",
+                "url": "https://github.com/SCE-Development/"
+                + repo_config.name,
+                "description": f"{repo_config.branch} was pushed to, but the current branch is {current_branch}.",
+                "color": color,
+            }
+        ]
+    }
+    try:
+        discord_webhook = requests.post(
+            str(os.getenv("CICD_DISCORD_WEBHOOK_URL")),
+            json=embed_json,
+        )
+        if discord_webhook.status_code in (200, 204):
+            return logger.info(f"Discord webhook response: {discord_webhook.text}")
+
+        logger.error(
+            f"Discord webhook returned status code: {discord_webhook.status_code} with text {discord_webhook.text}"
+        )
+    except Exception:
+        logger.exception("push_skipped_update_as_discord_embed had a bad time")
+
 
 def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
@@ -203,8 +238,27 @@ async def github_webhook(request: Request):
         return {"status": f"not acting on repo and branch name of {key}"}
 
     logger.info(f"Push to {branch} detected for {repo_name}")
-    # update the repo
-    thread = threading.Thread(target=update_repo, args=(config[key],))
+
+    repo_config = config[key]
+
+    if args.development:
+        logger.warning("assume we are on main branch, we are in development mode")
+        current_branch = "main"
+    else:
+        current_branch_result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo_config.path,
+            capture_output=True,
+            text=True,
+        )
+        current_branch = current_branch_result.stdout.strip()
+
+    if current_branch != branch:
+        logger.warning(f"current branch {current_branch} does not match updated branch {branch} on repo {repo_name}")
+        push_skipped_update_as_discord_embed(repo_config, current_branch, args.development)
+        return {"status": f"current branch {current_branch} does not match updated branch {branch} on repo {repo_name}"}
+    
+    thread = threading.Thread(target=update_repo, args=(repo_config,))
     thread.start()
 
     return {"status": "webhook received"}
