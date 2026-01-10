@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import time
 from metrics import MetricsHandler
-from prometheus_client import Gauge
+from prometheus_client import Gauge, REGISTRY
 from prometheus_client import generate_latest
 
 
@@ -130,7 +130,7 @@ def push_update_success_as_discord_embed(
         )
     except Exception:
         logger.exception("push_update_success_as_discord_embed had a bad time")
-        def get_docker_images_disk_usage_bytes():
+def get_docker_images_disk_usage_bytes():
     """
     Returns the total disk usage of all Docker images in bytes.
     """
@@ -145,7 +145,12 @@ def push_update_success_as_discord_embed(
     except Exception as e:
         print(f"Error getting Docker image disk usage: {e}")
         return None
-    docker_image_disk_usage_bytes = Gauge(
+def get_or_create_gauge(name, documentation):
+    try:
+        return REGISTRY._names_to_collectors[name]
+    except KeyError:
+        return Gauge(name, documentation)
+    docker_image_disk_usage_bytes = get_or_create_gauge(
     "docker_image_disk_usage_bytes",
     "Total disk usage of all Docker images in bytes"
 )
