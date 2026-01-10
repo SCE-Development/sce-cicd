@@ -16,6 +16,11 @@ class Metrics(enum.Enum):
         prometheus_client.Gauge,
         ["repo"],
     )
+    DOCKER_IMAGE_DISK_USAGE_BYTES = (
+        "docker_image_disk_usage_bytes",
+        "Total disk usage of all Docker images in bytes",
+        prometheus_client.Gauge,
+    )
 
     def __init__(self, title, description, prometheus_type, labels=()):
         # we use the above default value for labels because it matches what's used
