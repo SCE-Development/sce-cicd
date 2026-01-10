@@ -1,4 +1,5 @@
 import argparse
+import collections
 import dataclasses
 import json
 import logging
@@ -14,15 +15,14 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import time
 from metrics import MetricsHandler
-from collections import defaultdict
 
 from prometheus_client import generate_latest
-pending_commits = defaultdict(set)
 
 
 load_dotenv()
 
 app = FastAPI()
+pending_commits = collections.defaultdict(set)
 
 
 app.add_middleware(
@@ -269,8 +269,8 @@ def read_root():
 def start_smee():
     try:
         # sends the smee command to the tmux session named smee
+            # "npx",
         smee_cmd = [
-            "npx",
             "smee",
             "--url",
             os.getenv("SMEE_URL"),
@@ -280,6 +280,7 @@ def start_smee():
 
         process = subprocess.Popen(
             smee_cmd,
+            shell=True
         )
         logger.info(f"smee started with PID {process.pid}")
     except Exception:
