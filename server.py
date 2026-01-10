@@ -146,8 +146,7 @@ def push_update_success_as_discord_embed(
     ]
     output_lines = []
     for block_title, value in codeblocks:
-        if value:
-            output_lines.append(f"• {block_title}:\n```\n{value}\n```")
+        output_lines.append(f"• {block_title}:\n```\n{value if value else '(no output)'}\n```")
 
     description_list = [
         repo_branch_line,
