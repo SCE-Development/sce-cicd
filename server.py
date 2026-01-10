@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import threading
+from typing import Optional
 
 from dotenv import load_dotenv
 import uvicorn
@@ -60,6 +61,7 @@ class RepoUpdateResult:
     git_stderr: str = ""
     docker_stdout: str = ""
     docker_stderr: str = ""
+    maybe_rollback_result: Optional[bool] = None
 
 
 def load_config(development: bool):
@@ -69,7 +71,8 @@ def load_config(development: bool):
     with open("config.yml") as f:
         loaded_yaml = yaml.safe_load(f)
         for config in loaded_yaml.get("repos", []):
-            parsed = RepoToWatch(**config)
+            allowed = {k: v for k, v in config.items() if k in RepoToWatch.__dataclass_fields__}
+            parsed = RepoToWatch(**allowed)
             result[(parsed.name, parsed.branch)] = parsed
 
     return result
@@ -204,9 +207,11 @@ async def github_webhook(request: Request):
 
     logger.info(f"Push to {branch} detected for {repo_name}")
     # update the repo
-    thread = threading.Thread(target=update_repo, args=(config[key],))
-    thread.start()
-
+    if args.development:
+        update_repo(config[key], commit)
+    else:
+        thread = threading.Thread(target=update_repo, args=(config[key], commit))
+        thread.start()
     return {"status": "webhook received"}
 
 
