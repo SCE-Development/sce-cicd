@@ -66,8 +66,12 @@ class RepoUpdateResult:
     docker_stdout: str = ""
     docker_stderr: str = ""
     development: bool = False
+<<<<<<< HEAD
     maybe_rollback_result: bool | None = None
 >>>>>>> 4690508 (Add maybe_rollback_result to server.py)
+=======
+    maybe_rollback_result: Optional[bool] = None
+>>>>>>> 5c9e1eb (Change type hint for maybe_rollback_result to Optional)
 
 
 @dataclasses.dataclass
