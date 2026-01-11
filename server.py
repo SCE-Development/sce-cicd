@@ -61,7 +61,6 @@ class RepoUpdateResult:
     git_stderr: str = ""
     docker_stdout: str = ""
     docker_stderr: str = ""
-    maybe_rollback_result: Optional[bool] = None
 
 
 def load_config(development: bool):
