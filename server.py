@@ -1,3 +1,4 @@
+import sys
 import argparse
 import dataclasses
 import json
@@ -5,6 +6,7 @@ import logging
 import os
 import subprocess
 import threading
+import datetime
 
 from dotenv import load_dotenv
 import uvicorn
@@ -42,13 +44,21 @@ logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
 
 
 logger = logging.getLogger(__name__)
-
+def cicd_check():
+    error_condition = False  # Set to True to simulate failure
+    if error_condition:
+        print("Error detected! Exiting with 1.")
+        sys.exit(1)
+    else:
+        print("All checks passed.")
+        sys.exit(0)
 
 @dataclasses.dataclass
 class RepoToWatch:
     name: str
     branch: str
     path: str
+    enable_rollback: bool = False
 
 
 @dataclasses.dataclass
@@ -60,6 +70,8 @@ class RepoUpdateResult:
     git_stderr: str = ""
     docker_stdout: str = ""
     docker_stderr: str = ""
+    development: bool = False
+    maybe_rollback_result: Optional[bool] = None
 
 
 def load_config(development: bool):
@@ -97,6 +109,12 @@ def push_update_success_as_discord_embed(
         repo_name = prefix + " " + repo_name
         # do a gray color if we are sending "not real" embeds
         color = 0x99AAB5
+    if result.maybe_rollback_result is not None:
+        description_list.append("")
+        if result.maybe_rollback_result:
+            description_list.append("**Rollback status:** :white_check_mark: Rollback was attempted and succeeded.")
+        else:
+            description_list.append("**Rollback status:** :x: Rollback was attempted but failed.")
 
     embed_json = {
         "embeds": [
@@ -132,14 +150,41 @@ def push_update_success_as_discord_embed(
     except Exception:
         logger.exception("push_update_success_as_discord_embed had a bad time")
 
-
+def create_copy_of_cicd_branch(repo_config):
+    copy_branch_name = datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + f'-{repo_config.branch}'
+    try:
+        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
+        subprocess.run(["git", "checkout", "-b", copy_branch_name], cwd=repo_config.path, check=True)
+        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
+        logger.info(f"Created backup branch {copy_branch_name} for rollback protection.")
+        return copy_branch_name
+    except Exception:
+        logger.exception("Failed to create backup branch {copy_branch_name}")
+        return None
+def do_rollback(repo_config, copy_branch_name):
+    try:
+        # Reset main to backup branch
+        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
+        subprocess.run(["git", "reset", "--hard", copy_branch_name], cwd=repo_config.path, check=True)
+        # Delete backup branch
+        subprocess.run(["git", "branch", "-D", copy_branch_name], cwd=repo_config.path, check=True)
+        logger.info(f"Rolled back {repo_config.branch} to {copy_branch_name} and deleted backup branch.")
+        return True
+    except Exception as e:
+        logger.error(f"Rollback failed: {e}")
+        return False
+        
 def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
     )
-
-    result = RepoUpdateResult()
+    result = RepoUpdateResult(commit=commit_obj, author=author_obj)
+    copy_branch_name = None
+    # Backup branch logic
+    if getattr(repo_config, 'enable_rollback', False):
+        copy_branch_name = create_copy_of_cicd_branch(repo_config)
+        result.copy_branch_name = copy_branch_name
 
     if args.development:
         logging.warning("skipping command to update, we are in development mode")
@@ -165,10 +210,18 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
             text=True,
         )
         logger.info(f"Docker compose stdout: {docker_result.stdout}")
-        logger.info(f"Docker compose stdout: {docker_result.stderr}")
+        logger.info(f"Docker compose stderr: {docker_result.stderr}")
         result.docker_stdout = docker_result.stdout
         result.docker_stderr = docker_result.stderr
-        result.git_exit_code = git_result.returncode
+        result.docker_exit_code = docker_result.returncode
+        # rollback command for terminal
+        if docker_result.returncode != 0 and repo_config.enable_rollback:
+            rollback_worked = do_rollback(repo_config, copy_branch_name, result)
+            try:
+                subprocess.run(["git", "branch", "-D", copy_branch_name], cwd=repo_config.path, check=True)
+                logger.info(f"Deleted backup branch {copy_branch_name} after successful deployment.")
+            except Exception:
+                logger.error(f"Failed to delete backup branch {copy_branch_name}:")
         push_update_success_as_discord_embed(repo_config, result)
     except Exception:
         logger.exception("update_repo had a bad time")
