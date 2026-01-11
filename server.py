@@ -14,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import time
 from metrics import MetricsHandler
+
+
 from prometheus_client import generate_latest
 
 
@@ -130,19 +132,19 @@ def push_update_success_as_discord_embed(
     except Exception:
         logger.exception("push_update_success_as_discord_embed had a bad time")
 def get_docker_images_disk_usage_bytes():
-    """
-    Returns the total disk usage of all Docker images in bytes.
-    """
     try:
-        cmd = [
-            "sh", "-c",
-             'docker images --format "{{.Size}}" | awk \'/GB/ {gsub("GB", ""); sum+=($1*1024*1024*1024)} /MB/ {gsub("MB", ""); sum+=($1*1024*1024)} /kB/ {gsub("kB", ""); sum+=($1*1024)} END {print int(sum)}\''
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        output = result.stdout.strip()
-        return int(output)
-    except Exception:
-        logging.exception("Error getting Docker image disk usage:")
+        # Get docker system df output as JSON lines
+        result = subprocess.run(
+            ["docker", "system", "df", "--format", "{{json .}}"],
+            capture_output=True, text=True, check=True
+        )
+        for line in result.stdout.splitlines():
+            data = json.loads(line)
+            if data.get("Type") == "Images":
+                size_str = data["Size"]  # e.g., "8.423GB"
+                num, unit = float(size_str[:-2]), size_str[-2:]
+                multipliers = {"GB": 1024**3, "MB": 1024**2, "kB": 1024, "B": 1}
+                return int(num * multipliers.get(unit, 1))
         return None
 
 def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
