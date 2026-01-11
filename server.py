@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import threading
+from fnmatch import fnmatch
 
 from dotenv import load_dotenv
 import uvicorn
@@ -49,6 +50,7 @@ class RepoToWatch:
     name: str
     branch: str
     path: str
+    docker_ignore: list[str]
 
 
 @dataclasses.dataclass
@@ -132,8 +134,7 @@ def push_update_success_as_discord_embed(
     except Exception:
         logger.exception("push_update_success_as_discord_embed had a bad time")
 
-
-def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
+def update_repo(repo_config: RepoToWatch, files_changed: list[str]) -> RepoUpdateResult:
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
@@ -158,17 +159,27 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
         result.git_stderr = git_result.stderr
         result.git_exit_code = git_result.returncode
 
-        docker_result = subprocess.run(
-            ["docker-compose", "up", "--build", "-d"],
-            cwd=repo_config.path,
-            capture_output=True,
-            text=True,
+        # update if any file is NOT matched by docker_ignore
+        update_docker = any(
+            not any(fnmatch(file, pattern) for pattern in repo_config.docker_ignore)
+            for file in files_changed
         )
-        logger.info(f"Docker compose stdout: {docker_result.stdout}")
-        logger.info(f"Docker compose stdout: {docker_result.stderr}")
-        result.docker_stdout = docker_result.stdout
-        result.docker_stderr = docker_result.stderr
-        result.git_exit_code = git_result.returncode
+
+        if update_docker:
+            docker_result = subprocess.run(
+                ["docker-compose", "up", "--build", "-d"],
+                cwd=repo_config.path,
+                capture_output=True,
+                text=True,
+            )
+            logger.info(f"Docker compose stdout: {docker_result.stdout}")
+            logger.info(f"Docker compose stdout: {docker_result.stderr}")
+            result.docker_stdout = docker_result.stdout
+            result.docker_stderr = docker_result.stderr
+            result.git_exit_code = git_result.returncode
+        else:
+            logging.warning("skipping docker compose, no relevant files changed")
+
         push_update_success_as_discord_embed(repo_config, result)
     except Exception:
         logger.exception("update_repo had a bad time")
@@ -190,13 +201,15 @@ async def github_webhook(request: Request):
     ref = payload.get("ref", "")
     branch = ref.split("/")[-1]
     repo_name = payload.get("repository", {}).get("name")
+    head_commit = payload.get("head_commit", {})
+    files_changed = head_commit.get("added", []) + head_commit.get("modified", []) + head_commit.get("removed", [])
 
     key = (repo_name, branch)
 
     if args.development and key not in config:
         # if we are in development mode, pretend that
         # we wanted to watch this repo no matter what
-        config[key] = RepoToWatch(name=repo_name, branch=branch, path="/dev/null")
+        config[key] = RepoToWatch(name=repo_name, branch=branch, path="/dev/null", docker_ignore=[])
 
     if key not in config:
         logging.warning(f"not acting on repo and branch name of {key}")
@@ -204,7 +217,7 @@ async def github_webhook(request: Request):
 
     logger.info(f"Push to {branch} detected for {repo_name}")
     # update the repo
-    thread = threading.Thread(target=update_repo, args=(config[key],))
+    thread = threading.Thread(target=update_repo, args=(config[key], files_changed))
     thread.start()
 
     return {"status": "webhook received"}
