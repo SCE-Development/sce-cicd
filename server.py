@@ -131,7 +131,21 @@ def push_update_success_as_discord_embed(
         )
     except Exception:
         logger.exception("push_update_success_as_discord_embed had a bad time")
-
+def get_docker_images_disk_usage_bytes():
+    try:
+        # Get docker system df output as JSON lines
+        result = subprocess.run(
+            ["docker", "system", "df", "--format", "{{json .}}"],
+            capture_output=True, text=True, check=True
+        )
+        for line in result.stdout.splitlines():
+            data = json.loads(line)
+            if data.get("Type") == "Images":
+                size_str = data["Size"]  # e.g., "8.423GB"
+                num, unit = float(size_str[:-2]), size_str[-2:]
+                multipliers = {"GB": 1024**3, "MB": 1024**2, "kB": 1024, "B": 1}
+                return int(num * multipliers.get(unit, 1))
+        return None
 
 def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
@@ -212,6 +226,9 @@ async def github_webhook(request: Request):
 
 @app.get("/metrics")
 def get_metrics():
+    usage = get_docker_images_disk_usage_bytes()
+    if usage is not None:
+        docker_image_disk_usage_bytes.set(usage)
     return Response(
         media_type="text/plain",
         content=generate_latest(),
