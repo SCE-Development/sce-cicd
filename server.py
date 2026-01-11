@@ -71,7 +71,7 @@ class RepoUpdateResult:
     docker_stdout: str = ""
     docker_stderr: str = ""
     development: bool = False
-    maybe_rollback_result: bool | None = None
+    maybe_rollback_result: Optional[bool] = None
 
 
 def load_config(development: bool):
