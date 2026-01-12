@@ -61,6 +61,10 @@ class RepoUpdateResult:
     docker_stdout: str = ""
     docker_stderr: str = ""
 
+@dataclasses.dataclass
+class RepoUpdateRequest:
+    config: RepoToWatch
+
 
 def load_config(development: bool):
     result = {}
@@ -133,7 +137,8 @@ def push_update_success_as_discord_embed(
         logger.exception("push_update_success_as_discord_embed had a bad time")
 
 
-def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
+def update_repo(update_request: RepoUpdateRequest) -> RepoUpdateResult:
+    repo_config = update_request.config
     MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
     logger.info(
         f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
@@ -203,8 +208,10 @@ async def github_webhook(request: Request):
         return {"status": f"not acting on repo and branch name of {key}"}
 
     logger.info(f"Push to {branch} detected for {repo_name}")
+
+    update_request = RepoUpdateRequest(config=config[key])
     # update the repo
-    thread = threading.Thread(target=update_repo, args=(config[key],))
+    thread = threading.Thread(target=update_repo, args=(update_request,))
     thread.start()
 
     return {"status": "webhook received"}
