@@ -219,7 +219,7 @@ def handle_workflow_run(payload, repo_name):
     # update the repo
     thread = threading.Thread(target=update_repo, args=(config[key],))
     thread.start()
-    logger.info(f"Workflow_run: Stored commit {head_commit} for repo {repo_name}")  # <-- log here
+    logger.info(f" Workflow_run: Stored commit {head_commit} for repo {repo_name}")  # <-- log here
 
     return {"status": "webhook received"}
 
