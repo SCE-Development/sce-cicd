@@ -219,7 +219,7 @@ def handle_workflow_run(payload, repo_name):
     # update the repo
     thread = threading.Thread(target=update_repo, args=(config[key],))
     thread.start()
-    # logger.info(f"Stored {head_commit} for {repo_name}")
+    logger.info(f"Stored commit {head_commit} for repo {repo_name}")  # <-- log here
 
     return {"status": "webhook received"}
 
@@ -249,7 +249,6 @@ async def github_webhook(request: Request):
         }
     
     elif event_header == "workflow_run":
-        status = handle_workflow_run(payload, repo_name)
         handle_workflow_run(payload, repo_name)
         
     else: 
