@@ -1,6 +1,5 @@
 name: Test CI
 
-# Trigger this workflow on any push to any branch
 on:
   push:
 

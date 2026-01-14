@@ -2,7 +2,7 @@ name: After Test CI
 
 on:
   workflow_run:
-    workflows: ["Test CI"]  # Name of the workflow to listen for
+    workflows: ["Test CI"] 
     types:
       - completed
 
