@@ -4,5 +4,4 @@ node_modules/
 *.json
 !package.json
 __pycache__/
-*.yml
-*.yaml
+

@@ -1,0 +1,15 @@
+name: Test CI
+
+# Trigger this workflow on any push to any branch
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Echo hello
+        run: echo "Hello World"

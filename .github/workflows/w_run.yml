@@ -1,0 +1,17 @@
+name: After Test CI
+
+on:
+  workflow_run:
+    workflows: ["Test CI"]  # Name of the workflow to listen for
+    types:
+      - completed
+
+jobs:
+  post-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Echo workflow_run triggered
+        run: echo "Workflow_run triggered!"
