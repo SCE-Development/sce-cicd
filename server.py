@@ -219,7 +219,7 @@ def handle_workflow_run(payload, repo_name):
     # update the repo
     thread = threading.Thread(target=update_repo, args=(config[key],))
     thread.start()
-    logger.info(f"Stored commit {head_commit} for repo {repo_name}")  # <-- log here
+    logger.info(f"Workflow_run: Stored commit {head_commit} for repo {repo_name}")  # <-- log here
 
     return {"status": "webhook received"}
 
@@ -242,13 +242,15 @@ async def github_webhook(request: Request):
         if not head_commit:
             return {"status": "missing head_commit"}
         pending_commits[repo_name].add(head_commit)
-        logger.info(f"Stored {head_commit} for {repo_name}")
+        logger.info(f"Push: Stored {head_commit} for {repo_name}")
         
         return {
             "status": f"commit recorded"
         }
     
     elif event_header == "workflow_run":
+        logger.info(f"Event header is workflow_run for repo {repo_name}")
+
         handle_workflow_run(payload, repo_name)
         
     else: 
