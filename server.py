@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import time
 from metrics import MetricsHandler
+from queue import Queue
 
 
 from prometheus_client import generate_latest
@@ -204,11 +205,31 @@ async def github_webhook(request: Request):
 
     logger.info(f"Push to {branch} detected for {repo_name}")
     # update the repo
+    if deployment_line.qsize() == 1:
+        print("kicking a guy outta line rn brb")
+        deployment_line.get()
     thread = threading.Thread(target=update_repo, args=(config[key],))
-    thread.start()
+    # thread.start()
+    deployment_line.put(thread)
 
     return {"status": "webhook received"}
 
+# perhaps we create a separate handler for threads
+# a queue for threads
+# every webhook call adds it to the queue for threads
+# we built dis city
+# we built dis city on queues and threads
+deployment_line = Queue()
+
+def deployment_house():
+    print("hai welcome to the deployment house")
+    while True:
+        my_thread = deployment_line.get()
+        my_thread.start()
+        my_thread.join()
+
+deployment_thread = threading.Thread(target=deployment_house, daemon=True)
+deployment_thread.start()
 
 @app.get("/metrics")
 def get_metrics():
