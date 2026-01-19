@@ -133,10 +133,6 @@ def get_controller(key) -> DeployController:
         return ctrl
 
 
-
-
-
-
 def push_update_success_as_discord_embed(
     repo_config: RepoToWatch, result: RepoUpdateResult
 ):
