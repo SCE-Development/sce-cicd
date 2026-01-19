@@ -104,11 +104,22 @@ def get_args():
     return parser.parse_args()
 
 
-def run_command(args: list, cwd: str) -> ExecutionResult:
-    cmd_str = " ".join(args)
+def run_command(command_args: list, cwd: str) -> ExecutionResult:
+    cmd_str = " ".join(command_args)
+    
+    if args.development:
+        logger.info(f"mocking execution of \"{cmd_str}\" due to --development flag")
+        return ExecutionResult(
+            command=cmd_str,
+            exit_code=0,
+            stdout=f"{cmd_str} output would be here",
+            stderr="",
+            success=True
+        )
+
     try:
         process = subprocess.run(
-            args, cwd=cwd, capture_output=True, text=True, timeout=300
+            command_args, cwd=cwd, capture_output=True, text=True, timeout=300
         )
         return ExecutionResult(
             command=cmd_str,
@@ -222,15 +233,10 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
         is_dev=is_dev,
     )
 
-    if is_dev:
-        logger.info(f"Skipping shell execution for {repo_cfg.name} (Dev Mode)")
-        send_notification(status)
-        return
-
     logger.info(f"Starting deployment for {repo_cfg.name}:{repo_cfg.branch}")
 
     backup_branch = None
-    if repo_cfg.enable_rollback:
+    if repo_cfg.enable_rollback and not is_dev:
         backup_branch = create_backup_branch(repo_cfg)
 
     # Git Pull
@@ -388,15 +394,14 @@ REPO_MAP: Dict[Tuple[str, str], RepoConfig] = {}
 # turns it into a dictionary
 # result is the dictionary
 try:
-    if not args.development:
-        with open(args.config) as f:
-            raw_repos = yaml.safe_load(f).get("repos", [])
-            for r in raw_repos:
-                # make a new entry into the result dictionary
-                # the key is a tuple of the repo name and branch
-                # the value is a RepoToWatch object
-                cfg = RepoConfig(**r)
-                REPO_MAP[(cfg.name, cfg.branch)] = cfg
+    with open(args.config) as f:
+        raw_repos = yaml.safe_load(f).get("repos", [])
+        for r in raw_repos:
+            # make a new entry into the result dictionary
+            # the key is a tuple of the repo name and branch
+            # the value is a RepoToWatch object
+            cfg = RepoConfig(**r)
+            REPO_MAP[(cfg.name, cfg.branch)] = cfg
 except Exception:
     logger.exception(f"Failed to load config at path {args.config}")
 
