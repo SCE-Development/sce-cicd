@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import requests
 import time
 from metrics import MetricsHandler
-
+from typing import Dict, Optional, Tuple
 
 from prometheus_client import generate_latest
 
@@ -84,6 +84,57 @@ def get_args():
 args = get_args()
 
 config = load_config(args.development)
+
+
+class DeployController:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.running = False
+        self.pending = False
+
+    def trigger(self, repo_cfg: RepoToWatch):
+        
+        with self.lock:
+            if not self.running:
+                self.running = True
+                update_repo_thread = threading.Thread(target=self.worker, args=(repo_cfg,), daemon=True)
+                update_repo_thread.start()
+                return
+
+            # already running, ensure one more deploy happens afterward
+            self.pending = True
+
+    def worker(self, repo_cfg: RepoToWatch):
+        while True:
+            try:
+                update_repo(repo_cfg)
+            except Exception:
+                logger.exception("deploy worker failed")
+
+            with self.lock:
+                if self.pending:
+                    # consume pending and deploy again
+                    self.pending = False
+                    continue
+
+                self.running = False
+                return
+
+
+deploy_controllers = {}
+controllers_lock = threading.Lock()
+
+def get_controller(key) -> DeployController:
+    with controllers_lock:
+        ctrl = deploy_controllers.get(key)
+        if ctrl is None:
+            ctrl = DeployController()
+            deploy_controllers[key] = ctrl
+        return ctrl
+
+
+
+
 
 
 def push_update_success_as_discord_embed(
@@ -203,9 +254,13 @@ async def github_webhook(request: Request):
         return {"status": f"not acting on repo and branch name of {key}"}
 
     logger.info(f"Push to {branch} detected for {repo_name}")
-    # update the repo
-    thread = threading.Thread(target=update_repo, args=(config[key],))
-    thread.start()
+    
+    ###Old method without thread syncronization###
+
+    # thread = threading.Thread(target=update_repo, args=(config[key],))
+    # thread.start()
+    get_controller(key).trigger(config[key])
+
 
     return {"status": "webhook received"}
 
