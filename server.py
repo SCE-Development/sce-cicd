@@ -1,10 +1,10 @@
 import argparse
+import dataclasses
 import getpass
 import logging
 import os
 import socket
 import subprocess
-import sys
 import time
 from typing import Dict, Optional, Tuple
 
@@ -14,7 +14,6 @@ import yaml
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
 from metrics import MetricsHandler
 from prometheus_client import generate_latest
@@ -33,13 +32,15 @@ logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
-class RepoConfig(BaseModel):
+@dataclasses.dataclass
+class RepoConfig:
     name: str
     branch: str
     path: str
 
 
-class ExecutionResult(BaseModel):
+@dataclasses.dataclass
+class ExecutionResult:
     command: str
     exit_code: int = 1
     stdout: str = ""
@@ -47,14 +48,15 @@ class ExecutionResult(BaseModel):
     success: bool = False
 
 
-class DeploymentStatus(BaseModel):
+@dataclasses.dataclass
+class DeploymentStatus:
     repo: str
     branch: str
     commit_id: str = "commit_id not set"
     commit_msg: str = "commit_msg not set"
     author: str = "author not set"
-    git_res: Optional[ExecutionResult] = None
-    docker_res: Optional[ExecutionResult] = None
+    git_execution_result: Optional[ExecutionResult] = None
+    docker_execution_result: Optional[ExecutionResult] = None
     is_dev: bool = False
 
 
@@ -69,7 +71,9 @@ def get_args():
         "--port", type=int, default=3000, help="Port to run the server on"
     )
     parser.add_argument(
-        "--config", default="config.yml", help="path to config file, defaults to ./config.yml"
+        "--config",
+        default="config.yml",
+        help="path to config file, defaults to ./config.yml",
     )
     return parser.parse_args()
 
@@ -105,7 +109,7 @@ def send_notification(status: DeploymentStatus):
     if status.is_dev:
         color = 0x99AAB5
         title = "[Development Mode]"
-    elif not status.git_res or status.git_res.success:
+    elif not status.git_execution_result or status.git_execution_result.success:
         color = 0x57F287
         title = "Deployment Successful"
 
@@ -116,13 +120,16 @@ def send_notification(status: DeploymentStatus):
         f"**Author:** {status.author} | **Host:** `{env_str}`\n"
     )
 
-    for res in [status.git_res, status.docker_res]:
-        if not res:
+    for execution_result in [
+        status.git_execution_result,
+        status.docker_execution_result,
+    ]:
+        if not execution_result:
             continue
-        icon = "✅" if res.success else "⚠️"
-        description += f"\n{icon} `{res.command}` (Exit: {res.exit_code})"
-        if res.stderr:
-            description += f"\n```stderr\n{res.stderr[:250]}```"
+        icon = "✅" if execution_result.success else "⚠️"
+        description += f"\n{icon} `{execution_result.command}` (Exit: {execution_result.exit_code})"
+        if execution_result.stderr:
+            description += f"\n```stderr\n{execution_result.stderr[:250]}```"
 
     payload = {"embeds": [{"title": title, "description": description, "color": color}]}
     try:
@@ -152,16 +159,16 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
     logger.info(f"Starting deployment for {repo_cfg.name}:{repo_cfg.branch}")
 
     # Git Pull
-    status.git_res = run_command(
+    status.git_execution_result = run_command(
         ["git", "pull", "origin", repo_cfg.branch], repo_cfg.path
     )
-    if not status.git_res.success:
+    if not status.git_execution_result.success:
         logger.error(f"Git pull failed for {repo_cfg.name}")
         send_notification(status)
         return
 
     # Docker Compose
-    status.docker_res = run_command(
+    status.docker_execution_result = run_command(
         ["docker-compose", "up", "--build", "-d"], repo_cfg.path
     )
 
@@ -238,6 +245,7 @@ def start_smee():
         logger.info(f"Smee client started (PID: {proc.pid}) targeting {target}")
     except Exception:
         logger.exception("Failed to start smee client")
+
 
 if __name__ == "server":
     MetricsHandler.init()
