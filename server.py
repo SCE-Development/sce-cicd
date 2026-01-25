@@ -21,12 +21,14 @@ from prometheus_client import generate_latest
 
 load_dotenv()
 
-# We include funcName here so we don't have to manually label logs
-LOG_FORMAT = (
-    "%(asctime)s.%(msecs)03dZ [%(levelname)s] %(name)s:%(funcName)s: %(message)s"
+logging.basicConfig(
+    # in mondo we trust
+    format="%(asctime)s.%(msecs)03dZ %(threadName)s %(levelname)s:%(name)s:%(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+    level=logging.INFO,
 )
-logging.basicConfig(format=LOG_FORMAT, datefmt="%Y-%m-%dT%H:%M:%S", level=logging.INFO)
 logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
+logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +50,9 @@ class ExecutionResult(BaseModel):
 class DeploymentStatus(BaseModel):
     repo: str
     branch: str
-    commit_id: str = "unknown"
-    commit_msg: str = "N/A"
-    author: str = "unknown"
+    commit_id: str = "commit_id not set"
+    commit_msg: str = "commit_msg not set"
+    author: str = "author not set"
     git_res: Optional[ExecutionResult] = None
     docker_res: Optional[ExecutionResult] = None
     is_dev: bool = False
@@ -65,6 +67,9 @@ def get_args():
     )
     parser.add_argument(
         "--port", type=int, default=3000, help="Port to run the server on"
+    )
+    parser.add_argument(
+        "--config", default="config.yml", help="path to config file, defaults to ./config.yml"
     )
     return parser.parse_args()
 
@@ -168,19 +173,19 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
-ARGS = get_args()
+args = get_args()
 REPO_MAP: Dict[Tuple[str, str], RepoConfig] = {}
 
 # Load config once at startup
 try:
-    if not ARGS.development:
-        with open("config.yml") as f:
+    if not args.development:
+        with open(f"{args.config}") as f:
             raw_repos = yaml.safe_load(f).get("repos", [])
             for r in raw_repos:
                 cfg = RepoConfig(**r)
                 REPO_MAP[(cfg.name, cfg.branch)] = cfg
 except Exception:
-    logger.exception("Failed to load config.yml")
+    logger.exception(f"Failed to load config at path {args.config}")
 
 
 @app.post("/webhook")
@@ -198,7 +203,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
 
     # Resolve target config
     target = REPO_MAP.get(key)
-    if ARGS.development:
+    if args.development:
         target = target or RepoConfig(name=repo_name, branch=branch, path="/dev/null")
 
     if not target:
@@ -206,7 +211,7 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
         return {"status": "ignored", "reason": "Repository/Branch not tracked"}
 
     logger.info(f"Accepted push for {repo_name}:{branch}")
-    background_tasks.add_task(handle_deploy, target, payload, ARGS.development)
+    background_tasks.add_task(handle_deploy, target, payload, args.development)
     return {"status": "accepted"}
 
 
@@ -217,7 +222,7 @@ def get_metrics():
 
 @app.get("/")
 def health():
-    return {"status": "ok", "dev_mode": ARGS.development}
+    return {"status": "ok", "dev_mode": args.development}
 
 
 def start_smee():
@@ -225,7 +230,7 @@ def start_smee():
     if not url:
         return
 
-    target = f"http://127.0.0.1:{ARGS.port}/webhook"
+    target = f"http://127.0.0.1:{args.port}/webhook"
     try:
         proc = subprocess.Popen(
             ["npx", "smee", "--url", url, "--target", target], stdout=subprocess.DEVNULL
@@ -239,4 +244,4 @@ if __name__ == "server":
 
 if __name__ == "__main__":
     start_smee()
-    uvicorn.run("server:app", port=ARGS.port, reload=True)
+    uvicorn.run("server:app", port=args.port, reload=True)
