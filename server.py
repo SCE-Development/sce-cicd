@@ -1,35 +1,24 @@
 import argparse
 import dataclasses
-import json
+import getpass
 import logging
 import os
+import socket
 import subprocess
-import threading
+import time
+from typing import Dict, Optional, Tuple
 
-from dotenv import load_dotenv
+import requests
 import uvicorn
 import yaml
-from fastapi import FastAPI, Request, Response
+from dotenv import load_dotenv
+from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-import requests
-import time
+
 from metrics import MetricsHandler
-
-
 from prometheus_client import generate_latest
 
-
 load_dotenv()
-
-app = FastAPI()
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 logging.basicConfig(
     # in mondo we trust
@@ -40,207 +29,229 @@ logging.basicConfig(
 logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
 logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
 
-
 logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
-class RepoToWatch:
+class RepoConfig:
     name: str
     branch: str
     path: str
 
 
 @dataclasses.dataclass
-class RepoUpdateResult:
-    git_exit_code: int = 0
-    docker_exit_code: int = 0
-    development: bool = False
-    git_stdout: str = ""
-    git_stderr: str = ""
-    docker_stdout: str = ""
-    docker_stderr: str = ""
+class ExecutionResult:
+    command: str
+    exit_code: int = 1
+    stdout: str = ""
+    stderr: str = ""
+    success: bool = False
 
 
-def load_config(development: bool):
-    result = {}
-    if development:
-        return result
-    with open("config.yml") as f:
-        loaded_yaml = yaml.safe_load(f)
-        for config in loaded_yaml.get("repos", []):
-            parsed = RepoToWatch(**config)
-            result[(parsed.name, parsed.branch)] = parsed
-
-    return result
+@dataclasses.dataclass
+class DeploymentStatus:
+    repo: str
+    branch: str
+    commit_id: str = "commit_id not set"
+    commit_msg: str = "commit_msg not set"
+    author: str = "author not set"
+    git_execution_result: Optional[ExecutionResult] = None
+    docker_execution_result: Optional[ExecutionResult] = None
+    is_dev: bool = False
 
 
 def get_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--development", action="store_true")
+    parser = argparse.ArgumentParser(description="SCE CICD Server")
+    parser.add_argument(
+        "--development",
+        action="store_true",
+        help="Run in dev mode (no shell execution)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=3000, help="Port to run the server on"
+    )
+    parser.add_argument(
+        "--config",
+        default="config.yml",
+        help="path to config file, defaults to ./config.yml",
+    )
     return parser.parse_args()
 
 
-args = get_args()
-
-config = load_config(args.development)
-
-
-def push_update_success_as_discord_embed(
-    repo_config: RepoToWatch, result: RepoUpdateResult
-):
-    repo_name = repo_config.name
-    # default green
-    color = 0x57F287
-    if result.development:
-        prefix = "[development mode]"
-        repo_name = prefix + " " + repo_name
-        # do a gray color if we are sending "not real" embeds
-        color = 0x99AAB5
-
-    embed_json = {
-        "embeds": [
-            {
-                "title": f"{repo_name} was successfully updated",
-                "url": "https://github.com/SCE-Development/"
-                + repo_config.name,  # link to CICD project repo
-                "description": "\n".join(
-                    [
-                        f"• git pull exited with code **{result.git_exit_code}**",
-                        f"• git stdout: **```{result.git_stdout or 'No output'}```**",
-                        f"• git stderr: **```{result.git_stderr or 'No output'}```**",
-                        f"• docker-compose up exited with code **{result.docker_exit_code}**",
-                        f"• docker-compose up stdout: **```{result.docker_stdout or 'No output'}```**",
-                        f"• docker-compose up stderr: **```{result.docker_stderr or 'No output'}```**",
-                    ]
-                ),
-                "color": color,
-            }
-        ]
-    }
+def run_command(args: list, cwd: str) -> ExecutionResult:
+    cmd_str = " ".join(args)
     try:
-        discord_webhook = requests.post(
-            str(os.getenv("CICD_DISCORD_WEBHOOK_URL")),
-            json=embed_json,
+        process = subprocess.run(
+            args, cwd=cwd, capture_output=True, text=True, timeout=300
         )
-        if discord_webhook.status_code in (200, 204):
-            return logger.info(f"Discord webhook response: {discord_webhook.text}")
-
-        logger.error(
-            f"Discord webhook returned status code: {discord_webhook.status_code} with text {discord_webhook.text}"
+        return ExecutionResult(
+            command=cmd_str,
+            exit_code=process.returncode,
+            stdout=process.stdout.strip(),
+            stderr=process.stderr.strip(),
+            success=(process.returncode == 0),
         )
     except Exception:
-        logger.exception("push_update_success_as_discord_embed had a bad time")
+        logger.exception(f"Failed to execute {cmd_str}")
+        return ExecutionResult(command=cmd_str)
 
 
-def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
-    MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
-    logger.info(
-        f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
+def send_notification(status: DeploymentStatus):
+    webhook_url = os.getenv("CICD_DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        logger.warning("Discord webhook URL missing from environment")
+        return
+
+    # Default to failure/neutral
+    color = 0xED4245
+    title = "Deployment Failed"
+
+    if status.is_dev:
+        color = 0x99AAB5
+        title = "[Development Mode]"
+    elif not status.git_execution_result or status.git_execution_result.success:
+        color = 0x57F287
+        title = "Deployment Successful"
+
+    env_str = f"{getpass.getuser()}@{socket.gethostname()}"
+
+    commit_id_to_use = status.commit_id
+
+    # assume it's an actual commit so we truncate it to the first 7
+    if " " not in status.commit_id and status.commit_id is not None:
+        commit_id_to_use = status.commit_id[:7]
+
+    description = (
+        f"**Repo:** `{status.repo}:{status.branch}`\n"
+        f"**Commit:** `{commit_id_to_use}` — {status.commit_msg}\n"
+        f"**Author:** {status.author} | **Host:** `{env_str}`\n"
     )
 
-    result = RepoUpdateResult()
+    for execution_result in [
+        status.git_execution_result,
+        status.docker_execution_result,
+    ]:
+        if not execution_result:
+            continue
+        icon = "✅" if execution_result.success else "⚠️"
+        description += f"\n{icon} `{execution_result.command}` (Exit: {execution_result.exit_code})"
+        if execution_result.stderr:
+            description += f"\n```stderr\n{execution_result.stderr[:250]}```"
 
-    if args.development:
-        logging.warning("skipping command to update, we are in development mode")
-        result.development = True
-        return push_update_success_as_discord_embed(repo_config, result)
+    payload = {"embeds": [{"title": title, "description": description, "color": color}]}
     try:
-        git_result = subprocess.run(
-            ["git", "pull", "origin", repo_config.branch],
-            cwd=repo_config.path,
-            capture_output=True,
-            text=True,
-        )
-        logger.info(f"Git pull stdout: {git_result.stdout}")
-        logger.info(f"Git pull stderr: {git_result.stderr}")
-        result.git_stdout = git_result.stdout
-        result.git_stderr = git_result.stderr
-        result.git_exit_code = git_result.returncode
-
-        docker_result = subprocess.run(
-            ["docker-compose", "up", "--build", "-d"],
-            cwd=repo_config.path,
-            capture_output=True,
-            text=True,
-        )
-        logger.info(f"Docker compose stdout: {docker_result.stdout}")
-        logger.info(f"Docker compose stdout: {docker_result.stderr}")
-        result.docker_stdout = docker_result.stdout
-        result.docker_stderr = docker_result.stderr
-        result.git_exit_code = git_result.returncode
-        push_update_success_as_discord_embed(repo_config, result)
+        requests.post(webhook_url, json=payload, timeout=10).raise_for_status()
     except Exception:
-        logger.exception("update_repo had a bad time")
+        logger.exception("Failed to send Discord notification")
+
+
+def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
+    MetricsHandler.last_push_timestamp.labels(repo=repo_cfg.name).set(time.time())
+
+    commit = payload.get("head_commit") or {}
+    status = DeploymentStatus(
+        repo=repo_cfg.name,
+        branch=repo_cfg.branch,
+        commit_id=commit.get("id", "unknown"),
+        commit_msg=commit.get("message", "No message"),
+        author=commit.get("author", {}).get("username", "unknown"),
+        is_dev=is_dev,
+    )
+
+    if is_dev:
+        logger.info(f"Skipping shell execution for {repo_cfg.name} (Dev Mode)")
+        send_notification(status)
+        return
+
+    logger.info(f"Starting deployment for {repo_cfg.name}:{repo_cfg.branch}")
+
+    # Git Pull
+    status.git_execution_result = run_command(
+        ["git", "pull", "origin", repo_cfg.branch], repo_cfg.path
+    )
+    if not status.git_execution_result.success:
+        logger.error(f"Git pull failed for {repo_cfg.name}")
+        send_notification(status)
+        return
+
+    # Docker Compose
+    status.docker_execution_result = run_command(
+        ["docker-compose", "up", "--build", "-d"], repo_cfg.path
+    )
+
+    send_notification(status)
+
+
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
+
+args = get_args()
+REPO_MAP: Dict[Tuple[str, str], RepoConfig] = {}
+
+# Load config once at startup
+try:
+    if not args.development:
+        with open(f"{args.config}") as f:
+            raw_repos = yaml.safe_load(f).get("repos", [])
+            for r in raw_repos:
+                cfg = RepoConfig(**r)
+                REPO_MAP[(cfg.name, cfg.branch)] = cfg
+except Exception:
+    logger.exception(f"Failed to load config at path {args.config}")
 
 
 @app.post("/webhook")
-async def github_webhook(request: Request):
+async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     MetricsHandler.last_smee_request_timestamp.set(time.time())
-    payload_body = await request.body()
-    payload = json.loads(payload_body)
 
-    event_header = request.headers.get("X-GitHub-Event")
-    # check if this is a push event
-    if event_header != "push":
-        return {
-            "status": f"X-GitHub-Event header was not set to push, got value {event_header}"
-        }
+    event = request.headers.get("X-GitHub-Event")
+    if event != "push":
+        return {"status": "ignored", "reason": f"Event {event} is not 'push'"}
 
-    ref = payload.get("ref", "")
-    branch = ref.split("/")[-1]
+    payload = await request.json()
+    branch = payload.get("ref", "").split("/")[-1]
     repo_name = payload.get("repository", {}).get("name")
-
     key = (repo_name, branch)
 
-    if args.development and key not in config:
-        # if we are in development mode, pretend that
-        # we wanted to watch this repo no matter what
-        config[key] = RepoToWatch(name=repo_name, branch=branch, path="/dev/null")
+    # Resolve target config
+    target = REPO_MAP.get(key)
+    if args.development:
+        target = target or RepoConfig(name=repo_name, branch=branch, path="/dev/null")
 
-    if key not in config:
-        logging.warning(f"not acting on repo and branch name of {key}")
-        return {"status": f"not acting on repo and branch name of {key}"}
+    if not target:
+        logger.warning(f"No configuration found for {repo_name}:{branch}")
+        return {"status": "ignored", "reason": "Repository/Branch not tracked"}
 
-    logger.info(f"Push to {branch} detected for {repo_name}")
-    # update the repo
-    thread = threading.Thread(target=update_repo, args=(config[key],))
-    thread.start()
-
-    return {"status": "webhook received"}
+    logger.info(f"Accepted push for {repo_name}:{branch}")
+    background_tasks.add_task(handle_deploy, target, payload, args.development)
+    return {"status": "accepted"}
 
 
 @app.get("/metrics")
 def get_metrics():
-    return Response(
-        media_type="text/plain",
-        content=generate_latest(),
-    )
+    return Response(media_type="text/plain", content=generate_latest())
 
 
 @app.get("/")
-def read_root():
-    return {"message": "SCE CICD Server"}
+def health():
+    return {"status": "ok", "dev_mode": args.development}
 
 
 def start_smee():
-    try:
-        # sends the smee command to the tmux session named smee
-        smee_cmd = [
-            "npx",
-            "smee",
-            "--url",
-            os.getenv("SMEE_URL"),
-            "--target",
-            "http://127.0.0.1:3000/webhook",
-        ]
+    url = os.getenv("SMEE_URL")
+    if not url:
+        return
 
-        process = subprocess.Popen(
-            smee_cmd,
+    target = f"http://127.0.0.1:{args.port}/webhook"
+    try:
+        proc = subprocess.Popen(
+            ["npx", "smee", "--url", url, "--target", target], stdout=subprocess.DEVNULL
         )
-        logger.info(f"smee started with PID {process.pid}")
+        logger.info(f"Smee client started (PID: {proc.pid}) targeting {target}")
     except Exception:
-        logger.exception("Error starting smee")
+        logger.exception("Failed to start smee client")
 
 
 if __name__ == "server":
@@ -248,4 +259,4 @@ if __name__ == "server":
 
 if __name__ == "__main__":
     start_smee()
-    uvicorn.run("server:app", port=3000, reload=True)
+    uvicorn.run("server:app", port=args.port, reload=True)
