@@ -114,9 +114,16 @@ def send_notification(status: DeploymentStatus):
         title = "Deployment Successful"
 
     env_str = f"{getpass.getuser()}@{socket.gethostname()}"
+
+    commit_id_to_use = status.commit_id
+
+    # assume it's an actual commit so we truncate it to the first 7
+    if " " not in status.commit_id and status.commit_id is not None:
+        commit_id_to_use = status.commit_id[:7]
+
     description = (
         f"**Repo:** `{status.repo}:{status.branch}`\n"
-        f"**Commit:** `{status.commit_id[:7]}` — {status.commit_msg}\n"
+        f"**Commit:** `{commit_id_to_use}` — {status.commit_msg}\n"
         f"**Author:** {status.author} | **Host:** `{env_str}`\n"
     )
 
