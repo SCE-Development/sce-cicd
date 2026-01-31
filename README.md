@@ -27,6 +27,9 @@ repos:
   - name: git-workshop
     branch: main
     path: /home/sce/git-workshop
+    # uncomment the below two lines to force recreate a container
+    # containers_to_force_recreate:
+    #   - recipe-nginx
   - name: monitoring
     branch: main
     path: /home/sce/monitoring
