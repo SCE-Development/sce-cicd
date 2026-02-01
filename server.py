@@ -189,44 +189,51 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
         command.extend(repo_cfg.containers_to_force_recreate)
         status.docker_force_execution_result = run_command(command, repo_cfg.path)
 
+    logger.error(f"deployment complete for {repo_cfg.name}:{repo_cfg.branch}")
     send_notification(status)
 
 
 def push_skipped_update_as_discord_embed(
-    repo_config: RepoConfig, current_branch: str, development: bool
+    repo_config: RepoConfig, incoming_branch: str, local_branch: str
 ):
     repo_name = repo_config.name
-    color = 0xFFFF00
-    if development:
-        prefix = "[development mode]"
-        repo_name = prefix + " " + repo_name
-        color = 0x99AAB5
+    # Yellow warning color
+    color = 0xFFFF00 
+    
+    # Get user@hostname
+    env_str = f"{getpass.getuser()}@{socket.gethostname()}"
+
+    description = (
+        f"**Incoming Push:** `{incoming_branch}`\n"
+        f"**Local Branch:** `{local_branch}`\n"
+        f"**Path:** `{repo_config.path}`\n"
+        f"**Host:** `{env_str}`"
+    )
 
     embed_json = {
         "embeds": [
             {
-                "title": f"{repo_name} update skipped due to branch mismatch",
-                "url": "https://github.com/SCE-Development/"
-                + repo_config.name,
-                "description": f"{repo_config.branch} was pushed to, but the current branch is {current_branch}.",
+                "title": "Branch Mismatch: Deployment Skipped",
+                "url": f"https://github.com/SCE-Development/{repo_name}",
+                "description": description,
                 "color": color,
+                "footer": {
+                    "text": "The local branch must match the pushed branch to trigger CI/CD."
+                }
             }
         ]
     }
+    
     try:
-        discord_webhook = requests.post(
-            str(os.getenv("CICD_DISCORD_WEBHOOK_URL")),
+        response = requests.post(
+            os.getenv("CICD_DISCORD_WEBHOOK_URL"),
             json=embed_json,
+            timeout=10
         )
-        if discord_webhook.status_code in (200, 204):
-            return logger.info(f"Discord webhook response: {discord_webhook.text}")
-
-        logger.error(
-            f"Discord webhook returned status code: {discord_webhook.status_code} with text {discord_webhook.text}"
-        )
+        response.raise_for_status()
+        logger.info(f"Mismatch notification sent for {repo_name}")
     except Exception:
-        logger.exception("push_skipped_update_as_discord_embed had a bad time")
-
+        logger.exception("Failed to send mismatch notification to Discord")
 
 app = FastAPI()
 app.add_middleware(
@@ -272,18 +279,20 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
         logger.warning(f"No configuration found for {repo_name}:{branch}")
         return {"status": "ignored", "reason": "Repository/Branch not tracked"}
 
-    current_branch_result = subprocess.run(
-        ["git", "branch", "--show-current"],
-        cwd=target.path,
-        capture_output=True,
-        text=True,
-    )
-    current_branch = current_branch_result.stdout.strip()
+    if not args.development:
+        current_branch_result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=target.path,
+            capture_output=True,
+            text=True,
+        )
+        current_branch = current_branch_result.stdout.strip()
 
-    if current_branch != branch:
-        logger.warning(f"current branch {current_branch} does not match updated branch {branch} on repo {repo_name}")
-        push_skipped_update_as_discord_embed(target, current_branch, args.development)
-        return {"status": f"current branch {current_branch} does not match updated branch {branch} on repo {repo_name}"}
+        if current_branch != branch:
+            logger.warning(f"Branch mismatch for {repo_name}")
+            # Update the call to pass both branches
+            push_skipped_update_as_discord_embed(target, branch, current_branch)
+            return {"status": "skipped", "reason": "branch mismatch"}
 
     logger.info(f"Accepted push for {repo_name}:{branch}")
     background_tasks.add_task(handle_deploy, target, payload, args.development)
