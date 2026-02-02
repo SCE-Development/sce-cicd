@@ -181,8 +181,8 @@ def get_docker_images_disk_usage_bytes():
             number, unit = match.groups()
             # Normalize unit to uppercase for the map
             multiplier = UNIT_MAP.get(unit.upper(), 1)
-            
-            return int(float(number) * multiplier)
+            usage = int(float(number) * multiplier)
+            MetricsHandler.docker_image_disk_usage_bytes.set(usage)
 
         return None
     except Exception:
@@ -366,9 +366,8 @@ def start_smee():
 
 if __name__ == "server":
     MetricsHandler.init()
-    usage = get_docker_images_disk_usage_bytes()
-    if usage is not None:
-        MetricsHandler.docker_image_disk_usage_bytes.set(usage)
+    get_docker_images_disk_usage_bytes()
+
 
 if __name__ == "__main__":
     start_smee()
