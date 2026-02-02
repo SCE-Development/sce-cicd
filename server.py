@@ -275,7 +275,6 @@ def push_skipped_update_as_discord_embed(
     except Exception:
         logger.exception("Failed to send mismatch notification to Discord")
 
-
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
