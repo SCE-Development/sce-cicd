@@ -1,5 +1,6 @@
 import argparse
 import dataclasses
+import fnmatch
 import getpass
 import json
 import logging
@@ -42,6 +43,7 @@ class RepoConfig:
     # list of all the containers
     # makes sure theres a new list made for each repotowatch object
     containers_to_force_recreate: List[str] = dataclasses.field(default_factory=list)
+    docker_ignore: List[str] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -233,7 +235,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
     get_docker_images_disk_usage_bytes()
 
 
-def push_skipped_update_as_discord_embed(
+def push_skipped_update_as_discord_embed_mismatched_branch(
     repo_config: RepoConfig, incoming_branch: str, local_branch: str
 ):
     repo_name = repo_config.name
@@ -274,6 +276,69 @@ def push_skipped_update_as_discord_embed(
         logger.info(f"Mismatch notification sent for {repo_name}")
     except Exception:
         logger.exception("Failed to send mismatch notification to Discord")
+
+
+def push_skipped_update_as_discord_embed_docker_ignore(repo_cfg: RepoConfig, files_changed: List[str]):
+    webhook_url = os.getenv("CICD_DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        return
+
+    # A neutral Blue/Grey color for "Informational"
+    color = 0x3498db 
+    title = "Deployment Skipped (Ignored Files)"
+    
+    # Truncate file list if it's too long for Discord
+    files_display = "\n".join(files_changed[:10])
+    if len(files_changed) > 10:
+        files_display += f"\n*...and {len(files_changed) - 10} more*"
+
+    patterns_display = ", ".join([f"`{p}`" for p in repo_cfg.docker_ignore])
+    env_str = f"{getpass.getuser()}@{socket.gethostname()}"
+
+    description = (
+        f"**Repo:** `{repo_cfg.name}:{repo_cfg.branch}`\n"
+        f"**Status:** No deployment triggered because all changed files match the `docker_ignore` patterns.\n\n"
+        f"**Matched Patterns:** {patterns_display}\n"
+        f"**Files Changed:**\n```\n{files_display}\n```\n"
+        f"**Host:** `{env_str}`"
+    )
+
+    payload = {
+        "embeds": [{
+            "title": title, 
+            "description": description, 
+            "color": color,
+            "footer": {"text": "CICD Engine • Filtered by docker_ignore"}
+        }]
+    }
+
+    try:
+        requests.post(webhook_url, json=payload, timeout=10)
+    except Exception:
+        logger.exception("Failed to send skip notification")
+
+
+def should_skip_deployment(files_changed: List[str], ignore_patterns: List[str]) -> bool:
+    """
+    Returns True if ALL changed files match the ignore patterns.
+    """
+    if not ignore_patterns:
+        return False
+    
+    if not files_changed:
+        # if we can't see the files, deploy anyway
+        return False
+
+    for file in files_changed:
+        # check if the current file matches any of the ignore patterns
+        is_ignored = any(fnmatch.fnmatch(file, pattern) for pattern in ignore_patterns)
+        
+        # if any file is outside the ignore pattern, we should deploy
+        if not is_ignored:
+            return False
+            
+    return True
+
 
 app = FastAPI()
 app.add_middleware(
@@ -331,8 +396,25 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
         if current_branch != branch:
             logger.warning(f"Branch mismatch for {repo_name}")
             # Update the call to pass both branches
-            push_skipped_update_as_discord_embed(target, branch, current_branch)
+            push_skipped_update_as_discord_embed_mismatched_branch(target, branch, current_branch)
             return {"status": "skipped", "reason": "branch mismatch"}
+
+    # 1. Extract changed files from the payload
+    head_commit = payload.get("head_commit") or {}
+    files_changed = (
+        head_commit.get("added", []) + 
+        head_commit.get("modified", []) + 
+        head_commit.get("removed", [])
+    )
+
+    # 2. Check if we should skip based on docker_ignore
+    if should_skip_deployment(files_changed, target.docker_ignore):
+        logger.info(f"Skipping deployment for {repo_name}: All files match docker_ignore.")
+        push_skipped_update_as_discord_embed_docker_ignore(target, files_changed)
+        return {
+            "status": "skipped", 
+            "reason": "all changed files ignored by docker_ignore"
+        }
 
     logger.info(f"Accepted push for {repo_name}:{branch}")
     background_tasks.add_task(handle_deploy, target, payload, args.development)
