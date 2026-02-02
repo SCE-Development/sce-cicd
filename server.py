@@ -152,6 +152,43 @@ def send_notification(status: DeploymentStatus):
         logger.exception("Failed to send Discord notification")
 
 
+def get_docker_images_disk_usage_bytes():
+    # Docker uses SI units: 1000^n
+    UNIT_MAP = {
+        'B': 1,
+        'KB': 10**3, 'KB': 10**3, 
+        'MB': 10**6, 'MB': 10**6,
+        'GB': 10**9, 'GB': 10**9,
+        'TB': 10**12
+    }
+    try:
+        # Get docker system df output as JSON lines
+        result = subprocess.run(
+            ["docker", "system", "df", "--format", "{{json .}}"],
+            capture_output=True, text=True, check=True
+        )
+        for line in result.stdout.splitlines():
+            data = json.loads(line)
+            if data.get("Type") != "Images":
+                continue
+
+            raw_size = data.get("Size", "")  # e.g., "8.423GB"
+            match = re.match(r"([0-9.]+)\s*([a-zA-Z]+)", raw_size)
+            if not match:
+                logger.info("could not extract image disk usage from docker response of {raw_size}")
+                return None
+            
+            number, unit = match.groups()
+            # Normalize unit to uppercase for the map
+            multiplier = UNIT_MAP.get(unit.upper(), 1)
+            
+            return int(float(number) * multiplier)
+
+        return None
+    except Exception:
+        logger.exception("Error getting Docker image disk usage")
+
+
 def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
     MetricsHandler.last_push_timestamp.labels(repo=repo_cfg.name).set(time.time())
 
@@ -238,41 +275,6 @@ def push_skipped_update_as_discord_embed(
     except Exception:
         logger.exception("Failed to send mismatch notification to Discord")
 
-def get_docker_images_disk_usage_bytes():
-    # Docker uses SI units: 1000^n
-    UNIT_MAP = {
-        'B': 1,
-        'KB': 10**3, 'KB': 10**3, 
-        'MB': 10**6, 'MB': 10**6,
-        'GB': 10**9, 'GB': 10**9,
-        'TB': 10**12
-    }
-    try:
-        # Get docker system df output as JSON lines
-        result = subprocess.run(
-            ["docker", "system", "df", "--format", "{{json .}}"],
-            capture_output=True, text=True, check=True
-        )
-        for line in result.stdout.splitlines():
-            data = json.loads(line)
-            if data.get("Type") != "Images":
-                continue
-
-            raw_size = data.get("Size", "")  # e.g., "8.423GB"
-            match = re.match(r"([0-9.]+)\s*([a-zA-Z]+)", raw_size)
-            if not match:
-                logger.info("could not extract image disk usage from docker response of {raw_size}")
-                return None
-            
-            number, unit = match.groups()
-            # Normalize unit to uppercase for the map
-            multiplier = UNIT_MAP.get(unit.upper(), 1)
-            
-            return int(float(number) * multiplier)
-
-        return None
-    except Exception:
-        logger.exception("Error getting Docker image disk usage")
 
 app = FastAPI()
 app.add_middleware(
