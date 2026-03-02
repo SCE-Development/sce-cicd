@@ -1,4 +1,3 @@
-
 import enum
 
 import prometheus_client
