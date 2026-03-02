@@ -1,5 +1,6 @@
 import argparse
 import dataclasses
+import datetime
 import fnmatch
 import getpass
 import json
@@ -45,6 +46,7 @@ class RepoConfig:
     containers_to_force_recreate: List[str] = dataclasses.field(default_factory=list)
     docker_ignore: List[str] = dataclasses.field(default_factory=list)
     actions_need_to_pass: bool = False
+    enable_rollback: bool = False
 
 
 @dataclasses.dataclass
@@ -212,12 +214,16 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
 
     logger.info(f"Starting deployment for {repo_cfg.name}:{repo_cfg.branch}")
 
+    backup_branch = None
+    if repo_cfg.enable_rollback:
+        backup_branch = create_backup_branch(repo_cfg)
+
     # Git Pull
     status.git_execution_result = run_command(
         ["git", "pull", "origin", repo_cfg.branch], repo_cfg.path
     )
     if not status.git_execution_result.success:
-        logger.error(f"Git pull failed for {repo_cfg.name}")
+        logger.error(f"Git pull failed for {repo_cfg.name}:{repo_cfg.branch}")
         send_notification(status)
         return
 
@@ -226,10 +232,24 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
         ["docker-compose", "up", "--build", "-d"], repo_cfg.path
     )
 
+    if not status.docker_execution_result.success:
+        logger.error(f"Docker build/up failed for {repo_cfg.name}:{repo_cfg.branch}")
+        
+        if repo_cfg.enable_rollback and backup_branch:
+            rollback_success = perform_rollback(repo_cfg, backup_branch)
+            if rollback_success:
+                status.commit_msg += " [ROLLED BACK DUE TO DOCKER FAILURE]"
+        
+        send_notification(status)
+        return
+
     if repo_cfg.containers_to_force_recreate:
         command = ["docker-compose", "up", "--build", "-d", "--force-recreate", "--no-deps"]
         command.extend(repo_cfg.containers_to_force_recreate)
         status.docker_force_execution_result = run_command(command, repo_cfg.path)
+
+    if backup_branch:
+        subprocess.run(["git", "branch", "-D", backup_branch], cwd=repo_cfg.path, capture_output=True)
 
     logger.error(f"deployment complete for {repo_cfg.name}:{repo_cfg.branch}")
     send_notification(status)
@@ -377,7 +397,7 @@ async def handle_workflow_run_event(payload: dict, target: RepoConfig, backgroun
     logger.info(f"Workflow {run_data.get('name')} for {target.name} is {action} ({conclusion})")
 
     if action == "completed" and conclusion == "success":
-        logger.info(f"Workflow passed! Triggering deployment for {target.name}")
+        logger.info(f"Workflow passed! Triggering deployment for {target.name}:{target.branch}")
         
         push_payload = {
             "head_commit": {
@@ -430,6 +450,35 @@ async def handle_push_event(payload: dict, target: RepoConfig, background_tasks:
     logger.info(f"Accepted push for {repo_name}:{branch}")
     background_tasks.add_task(handle_deploy, target, payload, args.development)
     return {"status": "accepted"}
+
+def create_backup_branch(repo_cfg: RepoConfig) -> Optional[str]:
+    """Creates a temporary local branch to save the current state before pulling."""
+    timestamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    backup_name = f"backup-{timestamp}-{repo_cfg.branch}"
+    try:
+        subprocess.run(["git", "checkout", repo_cfg.branch], cwd=repo_cfg.path, check=True, capture_output=True)
+        subprocess.run(["git", "branch", backup_name], cwd=repo_cfg.path, check=True, capture_output=True)
+        logger.info(f"Created backup snapshot: {backup_name}")
+        return backup_name
+    except Exception:
+        logger.exception(f"Failed to create backup for {repo_cfg.name}:{repo_cfg.branch}")
+        return None
+
+def perform_rollback(repo_cfg: RepoConfig, backup_name: str):
+    """Resets the branch to the backup and restarts the containers."""
+    try:
+        logger.warning(f"Rolling back {repo_cfg.name} to {backup_name}")
+        # reset the local branch to exactly what was in the backup
+        subprocess.run(["git", "reset", "--hard", backup_name], cwd=repo_cfg.path, check=True)
+        # restart docker with the old (working) code
+        subprocess.run(["docker-compose", "up", "--build", "-d"], cwd=repo_cfg.path, check=True)
+        return True
+    except Exception:
+        logger.exception(f"Rollback failed for {repo_cfg.name}:{repo_cfg.branch}")
+        return False
+    finally:
+        # delete the backup branch after reset
+        subprocess.run(["git", "branch", "-D", backup_name], cwd=repo_cfg.path, capture_output=True)
 
 
 @app.post("/webhook")
