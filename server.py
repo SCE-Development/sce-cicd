@@ -6,9 +6,11 @@ import getpass
 import json
 import logging
 import os
+import queue
 import re
 import socket
 import subprocess
+import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -34,6 +36,19 @@ logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
 logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
+
+# perhaps we create a separate handler for threads
+# a queue for repo and branch
+# every webhook call adds it to the queue for repo and branch
+# we built dis city
+# we built dis city on queues and threads
+REPO_QUEUES: Dict[Tuple[str, str], queue.Queue] = {}
+
+# A Lock to ensure we don't create two threads for the same repo at once
+THREAD_MANAGER_LOCK = threading.Lock()
+
+# Track which repos have an active worker thread
+ACTIVE_WORKERS: set = set()
 
 
 @dataclasses.dataclass
@@ -385,6 +400,62 @@ try:
 except Exception:
     logger.exception(f"Failed to load config at path {args.config}")
 
+def deployment_worker(target: RepoConfig, is_dev: bool):
+    key = (target.name, target.branch)
+    q = REPO_QUEUES[key]
+
+    try:
+        # hai welcome to the deployment house
+        while True:
+            # kicking a guy outta line rn brb
+            payload = q.get()
+            
+            # debounce,: skip the stale entriesand grab the newest one.
+            # this disqualifies the older waiting deployments
+            while not q.empty():
+                logger.info(f"Discarding outdated request for {target.name} (newer one waiting)")
+                payload = q.get()
+
+            try:
+                handle_deploy(target, payload, is_dev)
+            except Exception:
+                logger.exception(f"Worker failed during deploy of {target.name}")
+            finally:
+                q.task_done()
+
+            with THREAD_MANAGER_LOCK:
+                if q.empty():
+                    ACTIVE_WORKERS.remove(key)
+                    logger.info(f"Worker for {target.name} exiting (queue empty)")
+                    return
+    except Exception:
+        logger.exception(f"Fatal error in worker thread for {target.name}")
+        with THREAD_MANAGER_LOCK:
+            ACTIVE_WORKERS.discard(key)
+
+
+def trigger_deployment(target: RepoConfig, payload: dict, is_dev: bool):
+    key = (target.name, target.branch)
+    
+    with THREAD_MANAGER_LOCK:
+        # Create queue if it doesn't exist
+        if key not in REPO_QUEUES:
+            REPO_QUEUES[key] = queue.Queue()
+        
+        # Add the work to the queue
+        REPO_QUEUES[key].put(payload)
+        
+        # If no worker is running for this repo, start one
+        if key not in ACTIVE_WORKERS:
+            ACTIVE_WORKERS.add(key)
+            t = threading.Thread(
+                target=deployment_worker, 
+                args=(target, is_dev), 
+                daemon=True,
+                name=f"Worker-{target.name}"
+            )
+            t.start()
+            logger.info(f"Started new worker thread for {target.name}")
 
 async def handle_workflow_run_event(payload: dict, target: RepoConfig, background_tasks: BackgroundTasks):
     if not target.actions_need_to_pass:
@@ -407,7 +478,7 @@ async def handle_workflow_run_event(payload: dict, target: RepoConfig, backgroun
             }
         }
         
-        background_tasks.add_task(handle_deploy, target, push_payload, args.development)
+        trigger_deployment(target, payload, args.development)
         return {"status": "accepted", "reason": "workflow success triggered deploy"}
 
     return {"status": "ignored", "reason": f"Workflow state {action}/{conclusion} does not trigger deploy"}
@@ -448,7 +519,7 @@ async def handle_push_event(payload: dict, target: RepoConfig, background_tasks:
         return {"status": "skipped", "reason": "all changed files ignored"}
 
     logger.info(f"Accepted push for {repo_name}:{branch}")
-    background_tasks.add_task(handle_deploy, target, payload, args.development)
+    trigger_deployment(target, payload, args.development)
     return {"status": "accepted"}
 
 def create_backup_branch(repo_cfg: RepoConfig) -> Optional[str]:
