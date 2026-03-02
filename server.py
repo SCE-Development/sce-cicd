@@ -223,7 +223,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
         ["git", "pull", "origin", repo_cfg.branch], repo_cfg.path
     )
     if not status.git_execution_result.success:
-        logger.error(f"Git pull failed for {repo_cfg.name}")
+        logger.error(f"Git pull failed for {repo_cfg.name}:{repo_cfg.branch}")
         send_notification(status)
         return
 
@@ -398,7 +398,7 @@ async def handle_workflow_run_event(payload: dict, target: RepoConfig, backgroun
     logger.info(f"Workflow {run_data.get('name')} for {target.name} is {action} ({conclusion})")
 
     if action == "completed" and conclusion == "success":
-        logger.info(f"Workflow passed! Triggering deployment for {target.name}")
+        logger.info(f"Workflow passed! Triggering deployment for {target.name}:{target.branch}")
         
         push_payload = {
             "head_commit": {
@@ -457,14 +457,12 @@ def create_backup_branch(repo_cfg: RepoConfig) -> Optional[str]:
     timestamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     backup_name = f"backup-{timestamp}-{repo_cfg.branch}"
     try:
-        # Ensure we are on the target branch first
         subprocess.run(["git", "checkout", repo_cfg.branch], cwd=repo_cfg.path, check=True, capture_output=True)
-        # Create the backup branch from the current (good) state
         subprocess.run(["git", "branch", backup_name], cwd=repo_cfg.path, check=True, capture_output=True)
         logger.info(f"Created backup snapshot: {backup_name}")
         return backup_name
     except Exception:
-        logger.exception(f"Failed to create backup for {repo_cfg.name}")
+        logger.exception(f"Failed to create backup for {repo_cfg.name}:{repo_cfg.branch}")
         return None
 
 def perform_rollback(repo_cfg: RepoConfig, backup_name: str):
@@ -477,7 +475,7 @@ def perform_rollback(repo_cfg: RepoConfig, backup_name: str):
         subprocess.run(["docker-compose", "up", "--build", "-d"], cwd=repo_cfg.path, check=True)
         return True
     except Exception:
-        logger.exception(f"CRITICAL: Rollback failed for {repo_cfg.name}")
+        logger.exception(f"Rollback failed for {repo_cfg.name}:{repo_cfg.branch}")
         return False
     finally:
         # Cleanup: Delete the backup branch after reset
