@@ -44,6 +44,7 @@ class RepoConfig:
     # makes sure theres a new list made for each repotowatch object
     containers_to_force_recreate: List[str] = dataclasses.field(default_factory=list)
     docker_ignore: List[str] = dataclasses.field(default_factory=list)
+    actions_need_to_pass: bool = False
 
 
 @dataclasses.dataclass
@@ -365,24 +366,40 @@ except Exception:
     logger.exception(f"Failed to load config at path {args.config}")
 
 
-@app.post("/webhook")
-async def github_webhook(request: Request, background_tasks: BackgroundTasks):
-    MetricsHandler.last_smee_request_timestamp.set(time.time())
+async def handle_workflow_run_event(payload: dict, target: RepoConfig, background_tasks: BackgroundTasks):
+    if not target.actions_need_to_pass:
+        return {"status": "ignored", "reason": f"actions_need_to_pass is not set to True for {target.name}:{target.branch}"}
 
-    event = request.headers.get("X-GitHub-Event")
-    if event != "push":
-        return {"status": "ignored", "reason": f"Event {event} is not 'push'"}
+    action = payload.get("action")
+    run_data = payload.get("workflow_run", {})
+    conclusion = run_data.get("conclusion")
+    
+    logger.info(f"Workflow {run_data.get('name')} for {target.name} is {action} ({conclusion})")
 
-    payload = await request.json()
+    if action == "completed" and conclusion == "success":
+        logger.info(f"Workflow passed! Triggering deployment for {target.name}")
+        
+        push_payload = {
+            "head_commit": {
+                "id": run_data.get("head_sha"),
+                "message": run_data.get("display_title"),
+                "author": {"username": run_data.get("triggering_actor", {}).get("login", "Github Actions")}
+            }
+        }
+        
+        background_tasks.add_task(handle_deploy, target, push_payload, args.development)
+        return {"status": "accepted", "reason": "workflow success triggered deploy"}
+
+    return {"status": "ignored", "reason": f"Workflow state {action}/{conclusion} does not trigger deploy"}
+
+
+async def handle_push_event(payload: dict, target: RepoConfig, background_tasks: BackgroundTasks):
+    """Handles logic specific to GitHub 'push' events."""
+    if target.actions_need_to_pass:
+        return {"status": "ignored", "reason": "actions_need_to_pass is set to True, waiting for workflow_run success"}
+
+    repo_name = target.name
     branch = payload.get("ref", "").split("/")[-1]
-    repo_name = payload.get("repository", {}).get("name")
-    key = (repo_name, branch)
-
-    # Resolve target config
-    target = REPO_MAP.get(key)
-    if not target:
-        logger.warning(f"No configuration found for {repo_name}:{branch}")
-        return {"status": "ignored", "reason": "Repository/Branch not tracked"}
 
     if not args.development:
         current_branch_result = subprocess.run(
@@ -395,11 +412,9 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
 
         if current_branch != branch:
             logger.warning(f"Branch mismatch for {repo_name}")
-            # Update the call to pass both branches
             push_skipped_update_as_discord_embed_mismatched_branch(target, branch, current_branch)
             return {"status": "skipped", "reason": "branch mismatch"}
 
-    # 1. Extract changed files from the payload
     head_commit = payload.get("head_commit") or {}
     files_changed = (
         head_commit.get("added", []) + 
@@ -407,19 +422,44 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
         head_commit.get("removed", [])
     )
 
-    # 2. Check if we should skip based on docker_ignore
     if should_skip_deployment(files_changed, target.docker_ignore):
         logger.info(f"Skipping deployment for {repo_name}: All files match docker_ignore.")
         push_skipped_update_as_discord_embed_docker_ignore(target, files_changed)
-        return {
-            "status": "skipped", 
-            "reason": "all changed files ignored by docker_ignore"
-        }
+        return {"status": "skipped", "reason": "all changed files ignored"}
 
     logger.info(f"Accepted push for {repo_name}:{branch}")
     background_tasks.add_task(handle_deploy, target, payload, args.development)
     return {"status": "accepted"}
 
+
+@app.post("/webhook")
+async def github_webhook(request: Request, background_tasks: BackgroundTasks):
+    MetricsHandler.last_smee_request_timestamp.set(time.time())
+    
+    event = request.headers.get("X-GitHub-Event")
+    payload = await request.json()
+    
+    repo_name = payload.get("repository", {}).get("name")
+    
+    branch = None
+    if event == "push":
+        branch = payload.get("ref", "").split("/")[-1]
+    if event == "workflow_run":
+        branch = payload.get("workflow_run", {}).get("head_branch")
+    
+    target = REPO_MAP.get((repo_name, branch))
+    
+    if not target:
+        logger.debug(f"No configuration found for {repo_name}:{branch}")
+        return {"status": "ignored", "reason": "Repository/Branch not tracked"}
+
+    if event == "push":
+        return await handle_push_event(payload, target, background_tasks)
+    
+    if event == "workflow_run":
+        return await handle_workflow_run_event(payload, target, background_tasks)
+    
+    return {"status": "ignored", "reason": f"Event {event} not handled"}
 
 @app.get("/metrics")
 def get_metrics():
