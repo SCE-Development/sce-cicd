@@ -49,29 +49,12 @@ class RepoConfig:
 
 
 @dataclasses.dataclass
-<<<<<<< HEAD
 class ExecutionResult:
     command: str
     exit_code: int = 1
     stdout: str = ""
     stderr: str = ""
     success: bool = False
-=======
-class RepoUpdateResult:
-    git_exit_code: int = 0
-    docker_exit_code: int = 0
-    development: bool = False
-    git_stdout: str = ""
-    git_stderr: str = ""
-    docker_stdout: str = ""
-    docker_stderr: str = ""
-    development: bool = False
-<<<<<<< HEAD
-    maybe_rollback_result: bool | None = None
->>>>>>> 4690508 (Add maybe_rollback_result to server.py)
-=======
-    maybe_rollback_result: Optional[bool] = None
->>>>>>> 5c9e1eb (Change type hint for maybe_rollback_result to Optional)
 
 
 @dataclasses.dataclass
@@ -258,7 +241,6 @@ def push_skipped_update_as_discord_embed_mismatched_branch(
     repo_config: RepoConfig, incoming_branch: str, local_branch: str
 ):
     repo_name = repo_config.name
-<<<<<<< HEAD
     # Yellow warning color
     color = 0xFFFF00 
     
@@ -271,21 +253,6 @@ def push_skipped_update_as_discord_embed_mismatched_branch(
         f"**Path:** `{repo_config.path}`\n"
         f"**Host:** `{env_str}`"
     )
-=======
-    # default green
-    color = 0x57F287
-    if result.development:
-        prefix = "[development mode]"
-        repo_name = prefix + " " + repo_name
-        # do a gray color if we are sending "not real" embeds
-        color = 0x99AAB5
-    if result.maybe_rollback_result is not None:
-        description_list.append("")
-        if result.maybe_rollback_result:
-            description_list.append("**Rollback status:** :white_check_mark: Rollback was attempted and succeeded.")
-        else:
-            description_list.append("**Rollback status:** :x: Rollback was attempted but failed.")
->>>>>>> 4690508 (Add maybe_rollback_result to server.py)
 
     embed_json = {
         "embeds": [
@@ -312,7 +279,6 @@ def push_skipped_update_as_discord_embed_mismatched_branch(
     except Exception:
         logger.exception("Failed to send mismatch notification to Discord")
 
-<<<<<<< HEAD
 
 def push_skipped_update_as_discord_embed_docker_ignore(repo_cfg: RepoConfig, files_changed: List[str]):
     webhook_url = os.getenv("CICD_DISCORD_WEBHOOK_URL")
@@ -337,36 +303,6 @@ def push_skipped_update_as_discord_embed_docker_ignore(repo_cfg: RepoConfig, fil
         f"**Matched Patterns:** {patterns_display}\n"
         f"**Files Changed:**\n```\n{files_display}\n```\n"
         f"**Host:** `{env_str}`"
-=======
-def create_copy_of_cicd_branch(repo_config):
-    copy_branch_name = datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + f'-{repo_config.branch}'
-    try:
-        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
-        subprocess.run(["git", "checkout", "-b", copy_branch_name], cwd=repo_config.path, check=True)
-        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
-        logger.info(f"Created backup branch {copy_branch_name} for rollback protection.")
-        return copy_branch_name
-    except Exception:
-        logger.exception("Failed to create backup branch {copy_branch_name}")
-        return None
-def do_rollback(repo_config, copy_branch_name):
-    try:
-        # Reset main to backup branch
-        subprocess.run(["git", "checkout", repo_config.branch], cwd=repo_config.path, check=True)
-        subprocess.run(["git", "reset", "--hard", copy_branch_name], cwd=repo_config.path, check=True)
-        # Delete backup branch
-        subprocess.run(["git", "branch", "-D", copy_branch_name], cwd=repo_config.path, check=True)
-        logger.info(f"Rolled back {repo_config.branch} to {copy_branch_name} and deleted backup branch.")
-        return True
-    except Exception as e:
-        logger.error(f"Rollback failed: {e}")
-        return False
-        
-def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
-    MetricsHandler.last_push_timestamp.labels(repo=repo_config.name).set(time.time())
-    logger.info(
-        f"updating {repo_config.name} to {repo_config.branch} in {repo_config.path}"
->>>>>>> 4690508 (Add maybe_rollback_result to server.py)
     )
 
     payload = {
@@ -379,42 +315,7 @@ def update_repo(repo_config: RepoToWatch) -> RepoUpdateResult:
     }
 
     try:
-<<<<<<< HEAD
         requests.post(webhook_url, json=payload, timeout=10)
-=======
-        git_result = subprocess.run(
-            ["git", "pull", "origin", repo_config.branch],
-            cwd=repo_config.path,
-            capture_output=True,
-            text=True,
-        )
-        logger.info(f"Git pull stdout: {git_result.stdout}")
-        logger.info(f"Git pull stderr: {git_result.stderr}")
-        result.git_stdout = git_result.stdout
-        result.git_stderr = git_result.stderr
-        result.git_exit_code = git_result.returncode
-
-        docker_result = subprocess.run(
-            ["docker-compose", "up", "--build", "-d"],
-            cwd=repo_config.path,
-            capture_output=True,
-            text=True,
-        )
-        logger.info(f"Docker compose stdout: {docker_result.stdout}")
-        logger.info(f"Docker compose stderr: {docker_result.stderr}")
-        result.docker_stdout = docker_result.stdout
-        result.docker_stderr = docker_result.stderr
-        result.docker_exit_code = docker_result.returncode
-        # rollback command for terminal
-        if docker_result.returncode != 0 and repo_config.enable_rollback:
-            rollback_worked = do_rollback(repo_config, copy_branch_name, result)
-            try:
-                subprocess.run(["git", "branch", "-D", copy_branch_name], cwd=repo_config.path, check=True)
-                logger.info(f"Deleted backup branch {copy_branch_name} after successful deployment.")
-            except Exception:
-                logger.error(f"Failed to delete backup branch {copy_branch_name}:")
-        push_update_success_as_discord_embed(repo_config, result)
->>>>>>> d767205 (fixed code to assume that copy_branch_name is set)
     except Exception:
         logger.exception("Failed to send skip notification")
 
