@@ -229,8 +229,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
 
     # Docker Compose
     status.docker_execution_result = run_command(
-        # ["docker-compose", "up", "--build", "-d"], repo_cfg.path
-        ["return", "1"], repo_cfg.path
+        ["docker-compose", "up", "--build", "-d"], repo_cfg.path
     )
 
     if not status.docker_execution_result.success:
@@ -469,16 +468,16 @@ def perform_rollback(repo_cfg: RepoConfig, backup_name: str):
     """Resets the branch to the backup and restarts the containers."""
     try:
         logger.warning(f"Rolling back {repo_cfg.name} to {backup_name}")
-        # Reset the local branch to exactly what was in the backup
+        # reset the local branch to exactly what was in the backup
         subprocess.run(["git", "reset", "--hard", backup_name], cwd=repo_cfg.path, check=True)
-        # Restart docker with the old (working) code
+        # restart docker with the old (working) code
         subprocess.run(["docker-compose", "up", "--build", "-d"], cwd=repo_cfg.path, check=True)
         return True
     except Exception:
         logger.exception(f"Rollback failed for {repo_cfg.name}:{repo_cfg.branch}")
         return False
     finally:
-        # Cleanup: Delete the backup branch after reset
+        # delete the backup branch after reset
         subprocess.run(["git", "branch", "-D", backup_name], cwd=repo_cfg.path, capture_output=True)
 
 
