@@ -86,6 +86,13 @@ class DeploymentStatus:
     is_dev: bool = False
 
 
+@dataclasses.dataclass
+class RollbackResult:
+    success: bool
+    git_execution_result: Optional[ExecutionResult] = None
+    docker_execution_result: Optional[ExecutionResult] = None
+
+
 def get_args():
     parser = argparse.ArgumentParser(description="SCE CICD Server")
     parser.add_argument(
@@ -146,7 +153,10 @@ def send_notification(status: DeploymentStatus):
     if status.is_dev:
         color = 0x99AAB5
         title = "[Development Mode]"
-    elif not status.git_execution_result or status.git_execution_result.success:
+    # check for success in git and docker
+    elif (status.git_execution_result and status.git_execution_result.success and
+          status.docker_execution_result and status.docker_execution_result.success and
+          (not status.docker_force_execution_result or status.docker_force_execution_result.success)):
         color = 0x57F287
         title = "Deployment Successful"
 
@@ -257,9 +267,13 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
         logger.error(f"Docker build/up failed for {repo_cfg.name}:{repo_cfg.branch}")
         
         if repo_cfg.enable_rollback and backup_branch:
-            rollback_success = perform_rollback(repo_cfg, backup_branch)
-            if rollback_success:
+            rollback_result = perform_rollback(repo_cfg, backup_branch)
+            if rollback_result.success:
                 status.commit_msg += " [ROLLED BACK DUE TO DOCKER FAILURE]"
+            else:
+                status.commit_msg += " [ROLLBACK UNSUCCESSFUL]"
+                status.git_execution_result = rollback_result.git_execution_result
+                status.docker_execution_result = rollback_result.docker_execution_result
         
         send_notification(status)
         return
@@ -546,16 +560,18 @@ def perform_rollback(repo_cfg: RepoConfig, backup_name: str):
     try:
         logger.warning(f"Rolling back {repo_cfg.name} to {backup_name}")
         # reset the local branch to exactly what was in the backup
-        subprocess.run(["git", "reset", "--hard", backup_name], cwd=repo_cfg.path, check=True)
+        git_execution_result = run_command(["git", "reset", "--hard", backup_name], repo_cfg.path)
         # restart docker with the old (working) code
-        subprocess.run(["docker-compose", "up", "--build", "-d"], cwd=repo_cfg.path, check=True)
-        return True
+        docker_execution_result = run_command(["docker-compose", "up", "--build", "-d"], repo_cfg.path)
+        success = git_execution_result.success and docker_execution_result.success
+        if not success:
+            raise Exception()
     except Exception:
         logger.exception(f"Rollback failed for {repo_cfg.name}:{repo_cfg.branch}")
-        return False
     finally:
         # delete the backup branch after reset
         subprocess.run(["git", "branch", "-D", backup_name], cwd=repo_cfg.path, capture_output=True)
+        return RollbackResult(success, git_execution_result, docker_execution_result)
 
 
 @app.post("/webhook")
