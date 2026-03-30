@@ -495,7 +495,8 @@ async def handle_push_event(payload: dict, target: RepoConfig, background_tasks:
         return {"status": "ignored", "reason": "actions_need_to_pass is set to True, waiting for workflow_run success"}
 
     repo_name = target.name
-    branch = payload.get("ref", "").split("/")[-1]
+    ref = payload.get("ref", "")
+    branch = ref[11:] if ref.startswith("refs/heads/") else ""
 
     if not args.development:
         current_branch_result = subprocess.run(
@@ -568,7 +569,8 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
     
     branch = None
     if event == "push":
-        branch = payload.get("ref", "").split("/")[-1]
+        ref = payload.get("ref", "")
+        branch = ref[11:] if ref.startswith("refs/heads/") else ""
     if event == "workflow_run":
         branch = payload.get("workflow_run", {}).get("head_branch")
     
