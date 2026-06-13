@@ -1,4 +1,3 @@
-import argparse
 import dataclasses
 import datetime
 import fnmatch
@@ -22,6 +21,7 @@ from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from metrics import MetricsHandler
+from modules.args import get_args
 from prometheus_client import generate_latest
 
 load_dotenv()
@@ -104,22 +104,6 @@ def validate_config(repo: dict):
         return unknown_fields
 
 
-def get_args():
-    parser = argparse.ArgumentParser(description="SCE CICD Server")
-    parser.add_argument(
-        "--development",
-        action="store_true",
-        help="Disables subprocess.run for git and docker. It will log what it would have ran and send a \"Development Mode\" notification to Discord.",
-    )
-    parser.add_argument(
-        "--port", type=int, default=3000, help="Port to run the server on"
-    )
-    parser.add_argument(
-        "--config",
-        default="config.yml",
-        help="path to config file, defaults to ./config.yml",
-    )
-    return parser.parse_args()
 
 
 def run_command(command_args: list, cwd: str) -> ExecutionResult:
