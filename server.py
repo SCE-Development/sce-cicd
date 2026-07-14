@@ -603,25 +603,24 @@ def health():
     return {"status": "ok", "dev_mode": args.development}
 
 
-def start_smee():
+async def smee_listen():
     url = os.getenv("SMEE_URL")
     if not url:
         return
-
     target = f"http://127.0.0.1:{args.port}/webhook"
-    try:
-        proc = subprocess.Popen(
-            ["npx", "smee", "--url", url, "--target", target], stdout=subprocess.DEVNULL
-        )
-        logger.info(f"Smee client started (PID: {proc.pid}) targeting {target}")
-    except Exception:
-        logger.exception("Failed to start smee client")
+    async with websockets.connect(url, additional_headers={"X-API-Key": os.getenv("SMEE_API_KEY", "")}) as ws:
+        logger.info(f"Connected to smee at {url}")
+        async for message in ws:
+            msg = json.loads(message)
+            requests.post(target, json=msg["payload"], headers={"X-GitHub-Event": msg["event"] or ""})
 
+def start_smee():
+    if os.getenv("SMEE_URL"):
+        threading.Thread(target=lambda: asyncio.run(smee_listen()), daemon=True, name="Smee2Client").start()
 
 if __name__ == "server":
     MetricsHandler.init()
     get_docker_images_disk_usage_bytes()
-
 
 if __name__ == "__main__":
     start_smee()
