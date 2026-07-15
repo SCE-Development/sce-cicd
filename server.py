@@ -607,12 +607,43 @@ async def smee_listen():
     url = os.getenv("SMEE_URL")
     if not url:
         return
-    target = f"http://127.0.0.1:{args.port}/webhook"
     async with websockets.connect(url, additional_headers={"X-API-Key": os.getenv("SMEE_API_KEY", "")}) as ws:
         logger.info(f"Connected to smee at {url}")
         async for message in ws:
-            msg = json.loads(message)
-            requests.post(target, json=msg["payload"], headers={"X-GitHub-Event": msg["event"] or ""})
+            MetricsHandler.last_smee_request_timestamp.set(time.time())
+
+            data = json.loads(message)
+            event = data["event"]
+            payload = data["payload"]
+
+            background_tasks = BackgroundTasks()
+
+            repo_name = payload.get("repository", {}).get("name")
+
+            branch = None
+            if event == "push":
+                branch = payload.get("ref", "").split("/")[-1]
+            if event == "workflow_run":
+                branch = payload.get("workflow_run", {}).get("head_branch")
+
+            target = REPO_MAP.get((repo_name, branch))
+
+            if not target:
+                logger.debug(f"No configuration found for {repo_name}:{branch}")
+                continue
+
+            if event == "push":
+                await handle_push_event(payload, target, background_tasks)
+                await background_tasks()
+                continue
+            
+            if event == "workflow_run":
+                await handle_workflow_run_event(payload, target, background_tasks)
+                await background_tasks()
+                continue
+            
+            continue
+
 
 def start_smee():
     if os.getenv("SMEE_URL"):
