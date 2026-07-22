@@ -24,6 +24,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from metrics import MetricsHandler
 from prometheus_client import generate_latest
 
+from modules.commit_status_helpers import (
+    CommitStatus, 
+    push_commit_status, 
+)
+
 load_dotenv()
 
 logging.basicConfig(
@@ -132,6 +137,46 @@ def run_command(command_args: list, cwd: str) -> ExecutionResult:
         logger.exception(f"Failed to execute {cmd_str}")
         return ExecutionResult(command=cmd_str)
 
+def send_github_status(status: DeploymentStatus): 
+    token = os.getenv("GITHUB_TOKEN") 
+
+    if not token: 
+        logger.warning("GitHub token missing from environment")
+        return 
+    
+    execution_results = [
+        status.git_execution_result, 
+        status.docker_execution_result, 
+        status.docker_force_execution_result, 
+    ]
+
+    if any(
+        result and not result.success 
+        for result in execution_results 
+    ): 
+        state = "failure"
+        description = "Deployment failed" 
+    else: 
+        state = "success" 
+        description = "Deployment successful"
+    
+    commit_status = CommitStatus(
+        state = state, 
+        description = description, 
+        context = "sce-cicd",
+    )
+
+    try: 
+        push_commit_status(
+            owner = "SCE-Development", 
+            repo = status.repo, 
+            sha = status.commit_id, 
+            token = token, 
+            status = commit_status, 
+        )
+        logger.info("GitHub commit status pushed successfully") 
+    except Exception: 
+        logger.exception("Failed to push GitHub commit status")
 
 def send_notification(status: DeploymentStatus):
     webhook_url = os.getenv("CICD_DISCORD_WEBHOOK_URL")
@@ -181,7 +226,6 @@ def send_notification(status: DeploymentStatus):
         requests.post(webhook_url, json=payload, timeout=10).raise_for_status()
     except Exception:
         logger.exception("Failed to send Discord notification")
-
 
 def get_docker_images_disk_usage_bytes():
     # Docker uses SI units: 1000^n
@@ -245,6 +289,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
     )
     if not status.git_execution_result.success:
         logger.error(f"Git pull failed for {repo_cfg.name}:{repo_cfg.branch}")
+        send_github_status(status) 
         send_notification(status)
         return
 
@@ -261,6 +306,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
             if rollback_success:
                 status.commit_msg += " [ROLLED BACK DUE TO DOCKER FAILURE]"
         
+        send_github_status(status)
         send_notification(status)
         return
 
@@ -273,6 +319,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
         subprocess.run(["git", "branch", "-D", backup_branch], cwd=repo_cfg.path, capture_output=True)
 
     logger.error(f"deployment complete for {repo_cfg.name}:{repo_cfg.branch}")
+    send_github_status(status) 
     send_notification(status)
     get_docker_images_disk_usage_bytes()
 
