@@ -16,4 +16,11 @@ def get_args():
         default="config.yml",
         help="path to config file, defaults to ./config.yml",
     )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="count",
+        default=0,
+        help="increase logging verbosity; can be used multiple times like -vvv"
+    )
     return parser.parse_args()

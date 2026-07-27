@@ -13,24 +13,24 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
-from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest
 import requests
 import uvicorn
+import websocket
 import yaml
 
 from metrics import MetricsHandler
 from modules.args import get_args
 
-load_dotenv()
 
+args = get_args()
 logging.basicConfig(
     # in mondo we trust
     format="%(asctime)s.%(msecs)03dZ %(threadName)s %(levelname)s:%(name)s:%(message)s",
     datefmt="%Y-%m-%dT%H:%M:%S",
-    level=logging.INFO,
+    level=logging.ERROR - (args.verbose * 10),
 )
 logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
 logging.getLogger("uvicorn.error").setLevel(logging.ERROR)
@@ -49,6 +49,11 @@ THREAD_MANAGER_LOCK = threading.Lock()
 
 # Track which repos have an active worker thread
 ACTIVE_WORKERS: set = set()
+
+# this stuff gets loaded from config.yml, see readme
+SMEE2_URL = None
+SMEE2_API_KEY = None
+CICD_DISCORD_WEBHOOK_URL = None
 
 
 @dataclasses.dataclass
@@ -136,7 +141,7 @@ def run_command(command_args: list, cwd: str) -> ExecutionResult:
 
 
 def send_notification(status: DeploymentStatus):
-    webhook_url = os.getenv("CICD_DISCORD_WEBHOOK_URL")
+    webhook_url = CICD_DISCORD_WEBHOOK_URL
     if not webhook_url:
         logger.warning("Discord webhook URL missing from environment")
         return
@@ -312,7 +317,7 @@ def push_skipped_update_as_discord_embed_mismatched_branch(
     
     try:
         response = requests.post(
-            os.getenv("CICD_DISCORD_WEBHOOK_URL"),
+            CICD_DISCORD_WEBHOOK_URL,
             json=embed_json,
             timeout=10
         )
@@ -323,8 +328,9 @@ def push_skipped_update_as_discord_embed_mismatched_branch(
 
 
 def push_skipped_update_as_discord_embed_docker_ignore(repo_cfg: RepoConfig, files_changed: List[str]):
-    webhook_url = os.getenv("CICD_DISCORD_WEBHOOK_URL")
+    webhook_url = CICD_DISCORD_WEBHOOK_URL
     if not webhook_url:
+        logger.info("skipping docker embed, cicd_discord_webhook_url is empty")
         return
 
     # A neutral Blue/Grey color for "Informational"
@@ -389,7 +395,6 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
-args = get_args()
 REPO_MAP: Dict[Tuple[str, str], RepoConfig] = {}
 
 # dis one loads the config.yml file
@@ -397,7 +402,11 @@ REPO_MAP: Dict[Tuple[str, str], RepoConfig] = {}
 # result is the dictionary
 try:
     with open(args.config) as f:
-        raw_repos = yaml.safe_load(f).get("repos", [])
+        data = yaml.safe_load(f)
+        raw_repos = data.get("repos", [])
+        SMEE2_URL = data.get("smee2_url")
+        SMEE2_API_KEY = data.get("smee2_api_key")
+        CICD_DISCORD_WEBHOOK_URL = data.get("cicd_discord_webhook_url")
         for r in raw_repos:
             # make a new entry into the result dictionary
             # the key is a tuple of the repo name and branch
@@ -446,7 +455,7 @@ def deployment_worker(target: RepoConfig, is_dev: bool):
             ACTIVE_WORKERS.discard(key)
 
 
-def trigger_deployment(target: RepoConfig, payload: dict, is_dev: bool):
+def trigger_deployment(target: RepoConfig, data: dict, is_dev: bool):
     key = (target.name, target.branch)
     
     with THREAD_MANAGER_LOCK:
@@ -455,7 +464,7 @@ def trigger_deployment(target: RepoConfig, payload: dict, is_dev: bool):
             REPO_QUEUES[key] = queue.Queue()
         
         # Add the work to the queue
-        REPO_QUEUES[key].put(payload)
+        REPO_QUEUES[key].put(data)
         
         # If no worker is running for this repo, start one
         if key not in ACTIVE_WORKERS:
@@ -469,7 +478,7 @@ def trigger_deployment(target: RepoConfig, payload: dict, is_dev: bool):
             t.start()
             logger.info(f"Started new worker thread for {target.name}")
 
-async def handle_workflow_run_event(payload: dict, target: RepoConfig, background_tasks: BackgroundTasks):
+def handle_workflow_run_event(payload: dict, target: RepoConfig):
     if not target.actions_need_to_pass:
         return {"status": "ignored", "reason": f"actions_need_to_pass is not set to True for {target.name}:{target.branch}"}
 
@@ -496,13 +505,13 @@ async def handle_workflow_run_event(payload: dict, target: RepoConfig, backgroun
     return {"status": "ignored", "reason": f"Workflow state {action}/{conclusion} does not trigger deploy"}
 
 
-async def handle_push_event(payload: dict, target: RepoConfig, background_tasks: BackgroundTasks):
+def handle_push_event(data: dict, target: RepoConfig):
     """Handles logic specific to GitHub 'push' events."""
     if target.actions_need_to_pass:
         return {"status": "ignored", "reason": "actions_need_to_pass is set to True, waiting for workflow_run success"}
 
     repo_name = target.name
-    branch = payload.get("ref", "").split("/")[-1]
+    branch = data.get("ref", "").split("/")[-1]
 
     if not args.development:
         current_branch_result = subprocess.run(
@@ -518,7 +527,7 @@ async def handle_push_event(payload: dict, target: RepoConfig, background_tasks:
             push_skipped_update_as_discord_embed_mismatched_branch(target, branch, current_branch)
             return {"status": "skipped", "reason": "branch mismatch"}
 
-    head_commit = payload.get("head_commit") or {}
+    head_commit = data.get("head_commit") or {}
     files_changed = (
         head_commit.get("added", []) + 
         head_commit.get("modified", []) + 
@@ -531,7 +540,7 @@ async def handle_push_event(payload: dict, target: RepoConfig, background_tasks:
         return {"status": "skipped", "reason": "all changed files ignored"}
 
     logger.info(f"Accepted push for {repo_name}:{branch}")
-    trigger_deployment(target, payload, args.development)
+    trigger_deployment(target, data, args.development)
     return {"status": "accepted"}
 
 def create_backup_branch(repo_cfg: RepoConfig) -> Optional[str]:
@@ -564,35 +573,6 @@ def perform_rollback(repo_cfg: RepoConfig, backup_name: str):
         subprocess.run(["git", "branch", "-D", backup_name], cwd=repo_cfg.path, capture_output=True)
 
 
-@app.post("/webhook")
-async def github_webhook(request: Request, background_tasks: BackgroundTasks):
-    MetricsHandler.last_smee_request_timestamp.set(time.time())
-    
-    event = request.headers.get("X-GitHub-Event")
-    payload = await request.json()
-    
-    repo_name = payload.get("repository", {}).get("name")
-    
-    branch = None
-    if event == "push":
-        branch = payload.get("ref", "").split("/")[-1]
-    if event == "workflow_run":
-        branch = payload.get("workflow_run", {}).get("head_branch")
-    
-    target = REPO_MAP.get((repo_name, branch))
-    
-    if not target:
-        logger.debug(f"No configuration found for {repo_name}:{branch}")
-        return {"status": "ignored", "reason": "Repository/Branch not tracked"}
-
-    if event == "push":
-        return await handle_push_event(payload, target, background_tasks)
-    
-    if event == "workflow_run":
-        return await handle_workflow_run_event(payload, target, background_tasks)
-    
-    return {"status": "ignored", "reason": f"Event {event} not handled"}
-
 @app.get("/metrics")
 def get_metrics():
     return Response(media_type="text/plain", content=generate_latest())
@@ -603,28 +583,42 @@ def health():
     return {"status": "ok", "dev_mode": args.development}
 
 
-async def smee_listen():
-    url = os.getenv("SMEE_URL")
+def smee_listen():
+    url = SMEE2_URL
     if not url:
+        logger.info(f'not listening to any github traffic because smee2_url is empty in {args.config}')
         return
-    async with websockets.connect(url, additional_headers={"X-API-Key": os.getenv("SMEE_API_KEY", "")}) as ws:
+    api_key = SMEE2_API_KEY
+    
+    try:
+        # 1. Establish a synchronous connection
+        ws = websocket.create_connection(url, header={"X-API-Key": api_key})
         logger.info(f"Connected to smee at {url}")
-        async for message in ws:
+        
+        # 2. Replace 'async for' with a blocking while loop
+        while True:
+            message = ws.recv()
             MetricsHandler.last_smee_request_timestamp.set(time.time())
 
             data = json.loads(message)
-            event = data["event"]
-            payload = data["payload"]
+            with open('idk.jsonl', 'a') as f:
+                f.write('\n')
+                f.write(message)
+            # we used to get it like
+            # event = request.headers.get("X-GitHub-Event")
+            event = None
+            repositiory = data.get("repository", {})
 
-            background_tasks = BackgroundTasks()
 
-            repo_name = payload.get("repository", {}).get("name")
-
+            repo_name = repositiory.get("name")
             branch = None
-            if event == "push":
-                branch = payload.get("ref", "").split("/")[-1]
-            if event == "workflow_run":
-                branch = payload.get("workflow_run", {}).get("head_branch")
+            
+            if data.get("pusher"):
+                branch = data.get("ref", "").split("/")[-1]
+                event = "push"
+            elif data.get("workflow_run"):
+                branch = data.get("workflow_run", {}).get("head_branch")
+                event = "workflow_run"
 
             target = REPO_MAP.get((repo_name, branch))
 
@@ -633,26 +627,24 @@ async def smee_listen():
                 continue
 
             if event == "push":
-                await handle_push_event(payload, target, background_tasks)
-                await background_tasks()
-                continue
-            
-            if event == "workflow_run":
-                await handle_workflow_run_event(payload, target, background_tasks)
-                await background_tasks()
-                continue
-            
-            continue
+                handle_push_event(data, target)
+            elif event == "workflow_run":
+                handle_workflow_run_event(data, target)
+                
+    except websocket.WebSocketConnectionClosedException:
+        logger.warning("Smee WebSocket connection closed by the server.")
+    except Exception as e:
+        logger.exception(f"could not connect to smee2 url {SMEE2_URL}")
+    finally:
+        if 'ws' in locals():
+            ws.close()
 
-
-def start_smee():
-    if os.getenv("SMEE_URL"):
-        threading.Thread(target=lambda: asyncio.run(smee_listen()), daemon=True, name="Smee2Client").start()
 
 if __name__ == "server":
     MetricsHandler.init()
     get_docker_images_disk_usage_bytes()
+    smee_listen()
+
 
 if __name__ == "__main__":
-    start_smee()
     uvicorn.run("server:app", port=args.port, reload=True)
