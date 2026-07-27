@@ -1,4 +1,3 @@
-import argparse
 import dataclasses
 import datetime
 import fnmatch
@@ -14,15 +13,16 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
-import requests
-import uvicorn
-import yaml
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import generate_latest
+import requests
+import uvicorn
+import yaml
 
 from metrics import MetricsHandler
-from prometheus_client import generate_latest
+from modules.args import get_args
 
 load_dotenv()
 
@@ -104,22 +104,6 @@ def validate_config(repo: dict):
         return unknown_fields
 
 
-def get_args():
-    parser = argparse.ArgumentParser(description="SCE CICD Server")
-    parser.add_argument(
-        "--development",
-        action="store_true",
-        help="Disables subprocess.run for git and docker. It will log what it would have ran and send a \"Development Mode\" notification to Discord.",
-    )
-    parser.add_argument(
-        "--port", type=int, default=3000, help="Port to run the server on"
-    )
-    parser.add_argument(
-        "--config",
-        default="config.yml",
-        help="path to config file, defaults to ./config.yml",
-    )
-    return parser.parse_args()
 
 
 def run_command(command_args: list, cwd: str) -> ExecutionResult:
@@ -424,6 +408,7 @@ try:
                     r.pop(f)
             cfg = RepoConfig(**r)
             REPO_MAP[(cfg.name, cfg.branch)] = cfg
+        logger.info(f'loaded {len(raw_repos)} repo(s) from config {args.config}')
 except Exception:
     logger.exception(f"Failed to load config at path {args.config}")
 
