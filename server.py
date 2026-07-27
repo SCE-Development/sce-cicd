@@ -13,16 +13,16 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
-import requests
-import uvicorn
-import yaml
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import generate_latest
+import requests
+import uvicorn
+import yaml
 
 from metrics import MetricsHandler
 from modules.args import get_args
-from prometheus_client import generate_latest
 
 load_dotenv()
 
@@ -408,6 +408,7 @@ try:
                     r.pop(f)
             cfg = RepoConfig(**r)
             REPO_MAP[(cfg.name, cfg.branch)] = cfg
+        logger.info(f'loaded {len(raw_repos)} repo(s) from config {args.config}')
 except Exception:
     logger.exception(f"Failed to load config at path {args.config}")
 
