@@ -23,8 +23,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from metrics import MetricsHandler
 from prometheus_client import generate_latest
+from modules.commit_status_helpers import CommitStatus, push_commit_status 
 
 load_dotenv()
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
 logging.basicConfig(
     # in mondo we trust
@@ -134,6 +136,46 @@ def run_command(command_args: list, cwd: str) -> ExecutionResult:
 
 
 def send_notification(status: DeploymentStatus):
+    execution_results = [
+        status.git_execution_result, 
+        status.docker_execution_result, 
+        status.docker_force_execution_result, 
+    ]
+
+    deployment_failed = any(
+        execution_result is not None and not execution_result.success 
+        for execution_result in execution_results 
+    )
+
+    if status.is_dev: 
+        logger.info("Development mode: Skipping GitHub notification")
+    elif not GITHUB_TOKEN:
+        logger.warning("GitHub token missing from environment")
+    elif not status.commit_id or status.commit_id == "unknown": 
+        logger.warning("Cannot push GitHub status because commit ID is missing")
+    else: 
+        commit_status = CommitStatus(
+            state = "failure" if deployment_failed else "success", 
+            description=(
+                "Deployment failed" 
+                if deployment_failed
+                else "Deployment successful"
+            ), 
+            context = "sce-cicd", 
+        )
+        
+        try: 
+            push_commit_status(
+                owner = "SCE-Development", 
+                repo = status.repo, 
+                sha = status.commit_id, 
+                token = GITHUB_TOKEN, 
+                status = commit_status, 
+            )
+            logger.info("GitHub commit status pushed successfully") 
+        except Exception: 
+            logger.exception("Failed to push GitHub commit status")
+
     webhook_url = os.getenv("CICD_DISCORD_WEBHOOK_URL")
     if not webhook_url:
         logger.warning("Discord webhook URL missing from environment")
@@ -146,7 +188,7 @@ def send_notification(status: DeploymentStatus):
     if status.is_dev:
         color = 0x99AAB5
         title = "[Development Mode]"
-    elif not status.git_execution_result or status.git_execution_result.success:
+    elif not deployment_failed:
         color = 0x57F287
         title = "Deployment Successful"
 
@@ -155,7 +197,7 @@ def send_notification(status: DeploymentStatus):
     commit_id_to_use = status.commit_id
 
     # assume it's an actual commit so we truncate it to the first 7
-    if " " not in status.commit_id and status.commit_id is not None:
+    if status.commit_id is not None and " " not in status.commit_id:
         commit_id_to_use = status.commit_id[:7]
 
     description = (
@@ -164,24 +206,25 @@ def send_notification(status: DeploymentStatus):
         f"**Author:** {status.author} | **Host:** `{env_str}`\n"
     )
 
-    for execution_result in [
-        status.git_execution_result,
-        status.docker_execution_result,
-        status.docker_force_execution_result,
-    ]:
-        if not execution_result:
-            continue
+    for execution_result in execution_results: 
+        if not execution_result: 
+            continue 
         icon = "✅" if execution_result.success else "⚠️"
-        description += f"\n{icon} `{execution_result.command}` (Exit: {execution_result.exit_code})"
-        if execution_result.stderr:
-            description += f"\n```stderr\n{execution_result.stderr}```"
+        description += (
+            f"\n{icon} `{execution_result.command}` "
+            f"(Exit: {execution_result.exit_code})" 
+        )
+
+        if execution_result.stderr: 
+            description += (
+                f"\n```stderr\n{execution_result.stderr}```"
+            )
 
     payload = {"embeds": [{"title": title, "description": description, "color": color}]}
     try:
         requests.post(webhook_url, json=payload, timeout=10).raise_for_status()
     except Exception:
         logger.exception("Failed to send Discord notification")
-
 
 def get_docker_images_disk_usage_bytes():
     # Docker uses SI units: 1000^n
