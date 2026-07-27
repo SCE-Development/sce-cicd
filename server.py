@@ -86,6 +86,24 @@ class DeploymentStatus:
     is_dev: bool = False
 
 
+REQUIRED_REPO_FIELDS = {
+    f.name for f in dataclasses.fields(RepoConfig)
+    if f.default == dataclasses.MISSING and f.default_factory == dataclasses.MISSING
+}
+
+
+def validate_config(repo: dict):
+    missing = REQUIRED_REPO_FIELDS - repo.keys()
+    if missing:
+        raise SystemExit(f"[config] Repo '{repo.get('name', '?')}' is missing fields: {missing}")
+    if not os.path.isdir(repo["path"]):
+        raise SystemExit(f"[config] Path does not exist for repo '{repo['name']}': {repo['path']}")
+    unknown_fields = repo.keys() - {f.name for f in dataclasses.fields(RepoConfig)} # set of all fields in RepoConfig
+    if unknown_fields:
+        logger.warning(f"[config] Repo '{repo.get('name', '?')}' has unknown fields: {unknown_fields}")
+        return unknown_fields
+
+
 def get_args():
     parser = argparse.ArgumentParser(description="SCE CICD Server")
     parser.add_argument(
@@ -400,6 +418,10 @@ try:
             # make a new entry into the result dictionary
             # the key is a tuple of the repo name and branch
             # the value is a RepoToWatch object
+            unknown_fields = validate_config(r)
+            if unknown_fields: # removes any extra fields not in RepoConfig
+                for f in unknown_fields:
+                    r.pop(f)
             cfg = RepoConfig(**r)
             REPO_MAP[(cfg.name, cfg.branch)] = cfg
 except Exception:
