@@ -1,7 +1,7 @@
 # sce's cicd server
 
 ### how to run
-- [ ] get the smee url and discord webhook url from a dev member
+- [ ] get the smee2 url and discord webhook url from a dev member
 - [ ] create virtual environment and install python modules
 ```sh
 # from within the folder of this project
