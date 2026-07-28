@@ -257,7 +257,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
 
     # Docker Compose
     status.docker_execution_result = run_command(
-        ["docker-compose", "up", "--build", "-d"], repo_cfg.path
+        ["docker", "compose", "up", "--build", "-d"], repo_cfg.path
     )
 
     if not status.docker_execution_result.success:
@@ -272,7 +272,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
         return
 
     if repo_cfg.containers_to_force_recreate:
-        command = ["docker-compose", "up", "--build", "-d", "--force-recreate", "--no-deps"]
+        command = ["docker", "compose", "up", "--build", "-d", "--force-recreate", "--no-deps"]
         command.extend(repo_cfg.containers_to_force_recreate)
         status.docker_force_execution_result = run_command(command, repo_cfg.path)
 
@@ -563,7 +563,7 @@ def perform_rollback(repo_cfg: RepoConfig, backup_name: str):
         # reset the local branch to exactly what was in the backup
         subprocess.run(["git", "reset", "--hard", backup_name], cwd=repo_cfg.path, check=True)
         # restart docker with the old (working) code
-        subprocess.run(["docker-compose", "up", "--build", "-d"], cwd=repo_cfg.path, check=True)
+        subprocess.run(["docker", "compose", "up", "--build", "-d"], cwd=repo_cfg.path, check=True)
         return True
     except Exception:
         logger.exception(f"Rollback failed for {repo_cfg.name}:{repo_cfg.branch}")
