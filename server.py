@@ -515,7 +515,7 @@ def handle_push_event(data: dict, target: RepoConfig):
 
     if not args.development:
         current_branch_result = subprocess.run(
-            ["git", "branch", "--show-current"],
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             cwd=target.path,
             capture_output=True,
             text=True,
