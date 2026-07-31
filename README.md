@@ -1,17 +1,7 @@
 # sce's cicd server
 
 ### how to run
-- [ ] get the smee url and discord webhook url from a dev member
-- [ ] create a `.env` file like
-```
-SMEE_URL=https://smee.io/SOME_VALUE_HERE
-CICD_DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/REST_OF_VALUE_HERE
-```
-- [ ] install smee
-```sh
-# from within the folder of this project
-npm install
-```
+- [ ] get the smee2 url and discord webhook url from a dev member
 - [ ] create virtual environment and install python modules
 ```sh
 # from within the folder of this project
@@ -23,6 +13,10 @@ python -m pip install -r requirements.txt
 ```
 - [ ] (if not development) create a `config.yml` file like
 ```yml
+smee2_url: wss://sce.sjsu.edu/webhook/asdf
+smee2_api_key: ask in discord for api key
+cicd_discord_webhook_url: https://discord.com/api/webhooks/REST_OF_VALUE_HERE
+
 repos:
   - name: git-workshop
     branch: main
