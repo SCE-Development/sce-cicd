@@ -25,8 +25,6 @@ from metrics import MetricsHandler
 from modules.args import get_args
 from modules.commit_status_helpers import CommitStatus, push_commit_status
 
-load_dotenv()
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
 args = get_args()
 logging.basicConfig(
@@ -57,6 +55,7 @@ ACTIVE_WORKERS: set = set()
 SMEE2_URL = None
 SMEE2_API_KEY = None
 CICD_DISCORD_WEBHOOK_URL = None
+GITHUB_TOKEN = None
 
 
 @dataclasses.dataclass
@@ -143,7 +142,7 @@ def run_command(command_args: list, cwd: str) -> ExecutionResult:
         return ExecutionResult(command=cmd_str)
 
 
-def send_notification(status: DeploymentStatus):
+def push_github_commit_status(status: DeploymentStatus):
     execution_results = [
         status.git_execution_result, 
         status.docker_execution_result, 
@@ -184,8 +183,9 @@ def send_notification(status: DeploymentStatus):
         except Exception: 
             logger.exception("Failed to push GitHub commit status")
 
-    webhook_url = CICD_DISCORD_WEBHOOK_URL
 
+def send_notification(status: DeploymentStatus):
+    webhook_url = CICD_DISCORD_WEBHOOK_URL
     if not webhook_url:
         logger.warning("Discord webhook URL missing from environment")
         return
@@ -197,7 +197,7 @@ def send_notification(status: DeploymentStatus):
     if status.is_dev:
         color = 0x99AAB5
         title = "[Development Mode]"
-    elif not deployment_failed:
+    elif not status.git_execution_result or status.git_execution_result.success:
         color = 0x57F287
         title = "Deployment Successful"
 
@@ -206,7 +206,7 @@ def send_notification(status: DeploymentStatus):
     commit_id_to_use = status.commit_id
 
     # assume it's an actual commit so we truncate it to the first 7
-    if status.commit_id is not None and " " not in status.commit_id:
+    if " " not in status.commit_id and status.commit_id is not None:
         commit_id_to_use = status.commit_id[:7]
 
     description = (
@@ -215,19 +215,17 @@ def send_notification(status: DeploymentStatus):
         f"**Author:** {status.author} | **Host:** `{env_str}`\n"
     )
 
-    for execution_result in execution_results: 
-        if not execution_result: 
-            continue 
+    for execution_result in [
+        status.git_execution_result,
+        status.docker_execution_result,
+        status.docker_force_execution_result,
+    ]:
+        if not execution_result:
+            continue
         icon = "✅" if execution_result.success else "⚠️"
-        description += (
-            f"\n{icon} `{execution_result.command}` "
-            f"(Exit: {execution_result.exit_code})" 
-        )
-
-        if execution_result.stderr: 
-            description += (
-                f"\n```stderr\n{execution_result.stderr}```"
-            )
+        description += f"\n{icon} `{execution_result.command}` (Exit: {execution_result.exit_code})"
+        if execution_result.stderr:
+            description += f"\n```stderr\n{execution_result.stderr}```"
 
     payload = {"embeds": [{"title": title, "description": description, "color": color}]}
     try:
@@ -452,6 +450,7 @@ try:
         SMEE2_URL = data.get("smee2_url")
         SMEE2_API_KEY = data.get("smee2_api_key")
         CICD_DISCORD_WEBHOOK_URL = data.get("cicd_discord_webhook_url")
+        GITHUB_TOKEN = data.get("github_token")
         for r in raw_repos:
             # make a new entry into the result dictionary
             # the key is a tuple of the repo name and branch
