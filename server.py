@@ -23,6 +23,7 @@ import yaml
 
 from metrics import MetricsHandler
 from modules.args import get_args
+from modules.commit_status_helpers import CommitStatus, push_commit_status
 
 
 args = get_args()
@@ -54,6 +55,7 @@ ACTIVE_WORKERS: set = set()
 SMEE2_URL = None
 SMEE2_API_KEY = None
 CICD_DISCORD_WEBHOOK_URL = None
+GITHUB_TOKEN = None
 
 
 @dataclasses.dataclass
@@ -140,6 +142,48 @@ def run_command(command_args: list, cwd: str) -> ExecutionResult:
         return ExecutionResult(command=cmd_str)
 
 
+def push_github_commit_status(status: DeploymentStatus):
+    execution_results = [
+        status.git_execution_result, 
+        status.docker_execution_result, 
+        status.docker_force_execution_result, 
+    ]
+
+    deployment_failed = any(
+        execution_result is not None and not execution_result.success 
+        for execution_result in execution_results 
+    )
+
+    if status.is_dev: 
+        logger.info("Development mode: Skipping GitHub notification")
+    elif not GITHUB_TOKEN:
+        logger.warning("GitHub token missing from environment")
+    elif not status.commit_id or status.commit_id == "unknown": 
+        logger.warning("Cannot push GitHub status because commit ID is missing")
+    else: 
+        commit_status = CommitStatus(
+            state = "failure" if deployment_failed else "success", 
+            description=(
+                "Deployment failed" 
+                if deployment_failed
+                else "Deployment successful"
+            ), 
+            context = "sce-cicd", 
+        )
+        
+        try: 
+            push_commit_status(
+                owner = "SCE-Development", 
+                repo = status.repo, 
+                sha = status.commit_id, 
+                token = GITHUB_TOKEN, 
+                status = commit_status, 
+            )
+            logger.info("GitHub commit status pushed successfully") 
+        except Exception: 
+            logger.exception("Failed to push GitHub commit status")
+
+
 def send_notification(status: DeploymentStatus):
     webhook_url = CICD_DISCORD_WEBHOOK_URL
     if not webhook_url:
@@ -188,7 +232,6 @@ def send_notification(status: DeploymentStatus):
         requests.post(webhook_url, json=payload, timeout=10).raise_for_status()
     except Exception:
         logger.exception("Failed to send Discord notification")
-
 
 def get_docker_images_disk_usage_bytes():
     # Docker uses SI units: 1000^n
@@ -407,6 +450,7 @@ try:
         SMEE2_URL = data.get("smee2_url")
         SMEE2_API_KEY = data.get("smee2_api_key")
         CICD_DISCORD_WEBHOOK_URL = data.get("cicd_discord_webhook_url")
+        GITHUB_TOKEN = data.get("github_token")
         for r in raw_repos:
             # make a new entry into the result dictionary
             # the key is a tuple of the repo name and branch
