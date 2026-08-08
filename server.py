@@ -23,6 +23,7 @@ import yaml
 
 from metrics import MetricsHandler
 from modules.args import get_args
+from modules.commit_status_helpers import CommitStatus, push_commit_status
 
 
 args = get_args()
@@ -54,6 +55,7 @@ ACTIVE_WORKERS: set = set()
 SMEE2_URL = None
 SMEE2_API_KEY = None
 CICD_DISCORD_WEBHOOK_URL = None
+GITHUB_TOKEN = None
 
 
 @dataclasses.dataclass
@@ -138,6 +140,55 @@ def run_command(command_args: list, cwd: str) -> ExecutionResult:
     except Exception:
         logger.exception(f"Failed to execute {cmd_str}")
         return ExecutionResult(command=cmd_str)
+
+
+def push_github_commit_status(status: DeploymentStatus):
+    if status.is_dev:
+        logger.info("Development mode: Skipping GitHub notification")
+        return
+    if not GITHUB_TOKEN:
+        logger.warning("GitHub token missing from environment")
+        return
+    if not status.commit_id or status.commit_id == "unknown": 
+        logger.warning("Cannot push GitHub status because commit ID is missing")
+        return
+
+    execution_results = [
+        ('Git Pull', 'git_execution_result', ),
+        ('Docker Build', 'docker_execution_result', ),
+    ]
+
+    if getattr(status, 'docker_force_execution_result', None) is not None:
+        execution_results.extend([
+            ('Docker Force Recreate', 'docker_force_execution_result', ),
+        ])
+
+    for step_title, status_field_name in execution_results:
+        execution_result = getattr(status, status_field_name, None)
+        deployment_failed = execution_result is not None and not execution_result.success 
+
+
+        commit_status = CommitStatus(
+            state = "failure" if deployment_failed else "success", 
+            description=(
+                "Deployment failed" 
+                if deployment_failed
+                else "Deployment successful"
+            ), 
+            context = f"[sce-cicd] {step_title}", 
+        )
+        
+        try: 
+            push_commit_status(
+                owner = "SCE-Development", 
+                repo = status.repo, 
+                sha = status.commit_id, 
+                token = GITHUB_TOKEN, 
+                status = commit_status, 
+            )
+            logger.info("GitHub commit status pushed successfully") 
+        except Exception: 
+            logger.exception("Failed to push GitHub commit status")
 
 
 def send_notification(status: DeploymentStatus):
@@ -252,6 +303,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
     )
     if not status.git_execution_result.success:
         logger.error(f"Git pull failed for {repo_cfg.name}:{repo_cfg.branch}")
+        push_github_commit_status(status)
         send_notification(status)
         return
 
@@ -268,6 +320,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
             if rollback_success:
                 status.commit_msg += " [ROLLED BACK DUE TO DOCKER FAILURE]"
         
+        push_github_commit_status(status)
         send_notification(status)
         return
 
@@ -280,6 +333,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
         subprocess.run(["git", "branch", "-D", backup_branch], cwd=repo_cfg.path, capture_output=True)
 
     logger.error(f"deployment complete for {repo_cfg.name}:{repo_cfg.branch}")
+    push_github_commit_status(status)
     send_notification(status)
     get_docker_images_disk_usage_bytes()
 
@@ -407,6 +461,7 @@ try:
         SMEE2_URL = data.get("smee2_url")
         SMEE2_API_KEY = data.get("smee2_api_key")
         CICD_DISCORD_WEBHOOK_URL = data.get("cicd_discord_webhook_url")
+        GITHUB_TOKEN = data.get("github_token")
         for r in raw_repos:
             # make a new entry into the result dictionary
             # the key is a tuple of the repo name and branch
@@ -601,9 +656,6 @@ def smee_listen():
             MetricsHandler.last_smee_request_timestamp.set(time.time())
 
             data = json.loads(message)
-            with open('idk.jsonl', 'a') as f:
-                f.write('\n')
-                f.write(message)
             # we used to get it like
             # event = request.headers.get("X-GitHub-Event")
             event = None
