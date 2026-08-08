@@ -16,6 +16,9 @@ python -m pip install -r requirements.txt
 smee2_url: wss://sce.sjsu.edu/webhook/asdf
 smee2_api_key: ask in discord for api key
 cicd_discord_webhook_url: https://discord.com/api/webhooks/REST_OF_VALUE_HERE
+# for generating a token, see
+# https://docs.github.com/en/rest/commits/statuses?apiVersion=2026-03-10#get-the-combined-status-for-a-specific-reference--fine-grained-access-tokens
+github_token: github token goes here, make sure has access to read commit statuses
 
 repos:
   - name: git-workshop
