@@ -54,7 +54,6 @@ def push_commit_status(
             "Authorization": f"Bearer {token.strip()}", 
             "Accept": "application/vnd.github+json", 
             "Content-Type": "application/json", 
-            "User-Agent": "sce-cicd",
         }, 
         method = "POST", 
     )
