@@ -159,20 +159,6 @@ def build_execution_log(
         f"{execution_result.stderr or '(empty)'}\n"
     )
 
-# temp test 
-if __name__ == "__main__":
-    test_result = ExecutionResult(
-        command="git pull origin main",
-        exit_code=0,
-        stdout="Already up to date.",
-        stderr="",
-        success=True,
-    )
-
-    print(build_execution_log("Git Pull", test_result))
-
-    raise SystemExit
-
 def push_github_commit_status(status: DeploymentStatus):
     if status.is_dev:
         logger.info("Development mode: Skipping GitHub notification")
@@ -196,8 +182,29 @@ def push_github_commit_status(status: DeploymentStatus):
 
     for step_title, status_field_name in execution_results:
         execution_result = getattr(status, status_field_name, None)
-        deployment_failed = execution_result is not None and not execution_result.success 
+        if execution_result is None: 
+            continue 
 
+        deployment_failed = not execution_result.success 
+
+        paste_url = None 
+
+        if not PASTEBIN_DEV_API_KEY:
+            logger.warning("Pastebin API key missing") 
+        else: 
+            try: 
+                paste_url = create_paste(
+                    developer_key = PASTEBIN_DEV_API_KEY,
+                    content = build_execution_log(
+                        step_title, 
+                        execution_result,
+                    ),
+                )
+                logger.info(f"{step_title} logs uploaded to Pastebin")
+            except Exception:
+                logger.exception(
+                    f"Failed to upload {step_title} logs to Pastebin"
+                )
 
         commit_status = CommitStatus(
             state = "failure" if deployment_failed else "success", 
@@ -207,6 +214,7 @@ def push_github_commit_status(status: DeploymentStatus):
                 else "Deployment successful"
             ), 
             context = f"[sce-cicd] {step_title}", 
+            target_url = paste_url, 
         )
         
         try: 
@@ -492,7 +500,7 @@ try:
         SMEE2_URL = data.get("smee2_url")
         SMEE2_API_KEY = data.get("smee2_api_key")
         CICD_DISCORD_WEBHOOK_URL = data.get("cicd_discord_webhook_url")
-        GITHUB_TOKEN = data.get("github_token")
+        GITHUB_TOKEN = data.get("github_token") or os.getenv("GITHUB_TOKEN")
         for r in raw_repos:
             # make a new entry into the result dictionary
             # the key is a tuple of the repo name and branch
@@ -728,6 +736,38 @@ if __name__ == "server":
     get_docker_images_disk_usage_bytes()
     smee_listen()
 
-
 if __name__ == "__main__":
-    uvicorn.run("server:app", port=args.port, reload=True)
+    test_status = DeploymentStatus(
+        repo="sce-cicd",
+        branch="add-deployment-log-links",
+        commit_id=subprocess.check_output(
+            ["git", "rev-parse", "HEAD"]
+        ).decode().strip(),
+        commit_msg="Testing deployment log links",
+        author="evelyn",
+        git_execution_result=ExecutionResult(
+            command="git pull origin main",
+            exit_code=0,
+            stdout="Already up to date.",
+            stderr="",
+            success=True,
+        ),
+        docker_execution_result=ExecutionResult(
+            command="docker compose up --build -d",
+            exit_code=0,
+            stdout="Container built successfully",
+            stderr="",
+            success=True,
+        ),
+        is_dev=False,
+    )
+
+    print("GitHub token loaded:", GITHUB_TOKEN is not None)
+    print("Pastebin key loaded:", PASTEBIN_DEV_API_KEY is not None)
+
+    push_github_commit_status(test_status)
+
+    print("Finished test")
+
+# if __name__ == "__main__":
+#    uvicorn.run("server:app", port=args.port, reload=True)
