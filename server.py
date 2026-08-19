@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest
+from dotenv import load_dotenv
 import requests
 import uvicorn
 import websocket
@@ -24,7 +25,10 @@ import yaml
 from metrics import MetricsHandler
 from modules.args import get_args
 from modules.commit_status_helpers import CommitStatus, push_commit_status
+from modules.pastebin_helpers import create_paste
 
+load_dotenv() 
+PASTEBIN_DEV_API_KEY = os.getenv("PASTEBIN_DEV_API_KEY")
 
 args = get_args()
 logging.basicConfig(
@@ -56,7 +60,6 @@ SMEE2_URL = None
 SMEE2_API_KEY = None
 CICD_DISCORD_WEBHOOK_URL = None
 GITHUB_TOKEN = None
-
 
 @dataclasses.dataclass
 class RepoConfig:
@@ -141,6 +144,34 @@ def run_command(command_args: list, cwd: str) -> ExecutionResult:
         logger.exception(f"Failed to execute {cmd_str}")
         return ExecutionResult(command=cmd_str)
 
+def build_execution_log(
+    step_title: str, 
+    execution_result: ExecutionResult, 
+) -> str:
+    return (
+        f"Step: {step_title}\n"
+        f"Command: {execution_result.command}\n"
+        f"Exit Code: {execution_result.exit_code}\n"
+        f"Success: {execution_result.success}\n"
+        f"\nSTDOUT:\n"
+        f"{execution_result.stdout or '(empty)'}\n"
+        f"\nSTDERR:\n"
+        f"{execution_result.stderr or '(empty)'}\n"
+    )
+
+# temp test 
+if __name__ == "__main__":
+    test_result = ExecutionResult(
+        command="git pull origin main",
+        exit_code=0,
+        stdout="Already up to date.",
+        stderr="",
+        success=True,
+    )
+
+    print(build_execution_log("Git Pull", test_result))
+
+    raise SystemExit
 
 def push_github_commit_status(status: DeploymentStatus):
     if status.is_dev:
