@@ -737,37 +737,4 @@ if __name__ == "server":
     smee_listen()
 
 if __name__ == "__main__":
-    test_status = DeploymentStatus(
-        repo="sce-cicd",
-        branch="add-deployment-log-links",
-        commit_id=subprocess.check_output(
-            ["git", "rev-parse", "HEAD"]
-        ).decode().strip(),
-        commit_msg="Testing deployment log links",
-        author="evelyn",
-        git_execution_result=ExecutionResult(
-            command="git pull origin main",
-            exit_code=0,
-            stdout="Already up to date.",
-            stderr="",
-            success=True,
-        ),
-        docker_execution_result=ExecutionResult(
-            command="docker compose up --build -d",
-            exit_code=0,
-            stdout="Container built successfully",
-            stderr="",
-            success=True,
-        ),
-        is_dev=False,
-    )
-
-    print("GitHub token loaded:", GITHUB_TOKEN is not None)
-    print("Pastebin key loaded:", PASTEBIN_DEV_API_KEY is not None)
-
-    push_github_commit_status(test_status)
-
-    print("Finished test")
-
-# if __name__ == "__main__":
-#    uvicorn.run("server:app", port=args.port, reload=True)
+    uvicorn.run("server:app", port=args.port, reload=True)
