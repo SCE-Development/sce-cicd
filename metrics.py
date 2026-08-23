@@ -43,3 +43,9 @@ class MetricsHandler:
                     metric.title, metric.description, labelnames=metric.labels
                 ),
             )
+    @classmethod
+    def push(cls, pushgateway_url: str) -> None:
+        prometheus_client.push_to_gateway(
+            pushgateway_url,
+            job="sce-cicd",
+        )
