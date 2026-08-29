@@ -16,7 +16,6 @@ from typing import Dict, List, Optional, Tuple
 from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest
-from dotenv import load_dotenv
 import requests
 import uvicorn
 import websocket
@@ -25,10 +24,8 @@ import yaml
 from metrics import MetricsHandler
 from modules.args import get_args
 from modules.commit_status_helpers import CommitStatus, push_commit_status
-from modules.pastebin_helpers import create_paste
+from modules.pastebin_helpers import build_execution_log, create_paste
 
-load_dotenv() 
-PASTEBIN_DEV_API_KEY = os.getenv("PASTEBIN_DEV_API_KEY")
 
 args = get_args()
 logging.basicConfig(
@@ -60,6 +57,8 @@ SMEE2_URL = None
 SMEE2_API_KEY = None
 CICD_DISCORD_WEBHOOK_URL = None
 GITHUB_TOKEN = None
+PASTEBIN_API_KEY = None
+
 
 @dataclasses.dataclass
 class RepoConfig:
@@ -144,20 +143,6 @@ def run_command(command_args: list, cwd: str) -> ExecutionResult:
         logger.exception(f"Failed to execute {cmd_str}")
         return ExecutionResult(command=cmd_str)
 
-def build_execution_log(
-    step_title: str, 
-    execution_result: ExecutionResult, 
-) -> str:
-    return (
-        f"Step: {step_title}\n"
-        f"Command: {execution_result.command}\n"
-        f"Exit Code: {execution_result.exit_code}\n"
-        f"Success: {execution_result.success}\n"
-        f"\nSTDOUT:\n"
-        f"{execution_result.stdout or '(empty)'}\n"
-        f"\nSTDERR:\n"
-        f"{execution_result.stderr or '(empty)'}\n"
-    )
 
 def push_github_commit_status(status: DeploymentStatus):
     if status.is_dev:
@@ -189,22 +174,21 @@ def push_github_commit_status(status: DeploymentStatus):
 
         paste_url = None 
 
-        if not PASTEBIN_DEV_API_KEY:
-            logger.warning("Pastebin API key missing") 
-        else: 
-            try: 
-                paste_url = create_paste(
-                    developer_key = PASTEBIN_DEV_API_KEY,
-                    content = build_execution_log(
-                        step_title, 
-                        execution_result,
-                    ),
-                )
-                logger.info(f"{step_title} logs uploaded to Pastebin")
-            except Exception:
-                logger.exception(
-                    f"Failed to upload {step_title} logs to Pastebin"
-                )
+        try: 
+            paste_url = create_paste(
+                developer_key = PASTEBIN_API_KEY,
+                step_title=step_title,
+                content =  build_execution_log(
+                    command=execution_result.command,
+                    stdout=execution_result.stdout,
+                    stderr=execution_result.stderr,
+                ),
+            )
+            logger.info(f"{step_title} logs uploaded to Pastebin")
+        except Exception:
+            logger.exception(
+                f"Failed to upload {step_title} logs to Pastebin"
+            )
 
         commit_status = CommitStatus(
             state = "failure" if deployment_failed else "success", 
@@ -500,7 +484,8 @@ try:
         SMEE2_URL = data.get("smee2_url")
         SMEE2_API_KEY = data.get("smee2_api_key")
         CICD_DISCORD_WEBHOOK_URL = data.get("cicd_discord_webhook_url")
-        GITHUB_TOKEN = data.get("github_token") or os.getenv("GITHUB_TOKEN")
+        GITHUB_TOKEN = data.get("github_token")
+        PASTEBIN_API_KEY = data.get("cleezy_token")
         for r in raw_repos:
             # make a new entry into the result dictionary
             # the key is a tuple of the repo name and branch
