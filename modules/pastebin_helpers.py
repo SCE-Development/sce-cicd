@@ -1,3 +1,4 @@
+import logging
 from urllib.parse import urljoin
 
 import requests
@@ -27,12 +28,10 @@ def create_paste(
     step_title: str,
     content: str,
     timeout_seconds: float = 15.0,
-) -> str:
+) -> str | None:
     if not developer_key.strip():
-        raise ValueError("API key cannot be empty")
-
-    if not content.strip():
-        raise ValueError("Paste content cannot be empty")
+        logging.warning("Pastebin API Key is empty")
+        return None
 
     create_url = "https://sce.sjsu.edu/p/create"
 
@@ -55,12 +54,17 @@ def create_paste(
 
     response.raise_for_status()
 
-    data = response.json()
+    try:
+        data = response.json()
+    except requests.exceptions.JSONDecodeError:
+        logging.exception(f"cannot decode JSON for {step_title}")
+        return None
 
     get_paste_base_url = "https://sce.sjsu.edu/p/"
     # extract the relative id (e.g., "2890b") and combine it with the base domain
     paste_id = data.get("id")
     if not paste_id:
-        raise RuntimeError(f"Response JSON missing 'url' field: {data}")
+        logging.error(f"for step {step_title}, response JSON missing 'id' field: {data}")
+        return None
 
     return urljoin(create_url, paste_id)

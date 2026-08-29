@@ -167,28 +167,26 @@ def push_github_commit_status(status: DeploymentStatus):
 
     for step_title, status_field_name in execution_results:
         execution_result = getattr(status, status_field_name, None)
-        if execution_result is None: 
-            continue 
-
-        deployment_failed = not execution_result.success 
+        deployment_failed = execution_result is not None and not execution_result.success 
 
         paste_url = None 
 
-        try: 
-            paste_url = create_paste(
-                developer_key = PASTEBIN_API_KEY,
-                step_title=step_title,
-                content =  build_execution_log(
-                    command=execution_result.command,
-                    stdout=execution_result.stdout,
-                    stderr=execution_result.stderr,
-                ),
-            )
-            logger.info(f"{step_title} logs uploaded to Pastebin")
-        except Exception:
-            logger.exception(
-                f"Failed to upload {step_title} logs to Pastebin"
-            )
+        if PASTEBIN_API_KEY is not None:
+            try:
+                paste_url = create_paste(
+                    developer_key = PASTEBIN_API_KEY,
+                    step_title=step_title,
+                    content =  build_execution_log(
+                        command=execution_result.command,
+                        stdout=execution_result.stdout,
+                        stderr=execution_result.stderr,
+                    ),
+                )
+                logger.info(f"{step_title} logs uploaded to Pastebin")
+            except Exception:
+                logger.exception(
+                    f"Failed to upload {step_title} logs to Pastebin"
+                )
 
         commit_status = CommitStatus(
             state = "failure" if deployment_failed else "success", 
@@ -720,6 +718,7 @@ if __name__ == "server":
     MetricsHandler.init()
     get_docker_images_disk_usage_bytes()
     smee_listen()
+
 
 if __name__ == "__main__":
     uvicorn.run("server:app", port=args.port, reload=True)
