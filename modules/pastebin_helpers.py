@@ -4,27 +4,23 @@ import requests
 
 
 def build_execution_log(
-    command: str, 
-    stdout: str | None, 
-    stderr: str | None, 
+    command: str,
+    stdout: str | None,
+    stderr: str | None,
 ) -> str:
-    log_parts = [
-        f"# {command}",
-        ""
-    ]
-    
+    log_parts = [f"# {command}", ""]
+
     if stdout:
         log_parts.append(stdout.strip())
-        
+
     if stderr:
         log_parts.append(stderr.strip())
-        
+
     if not stdout and not stderr:
         log_parts.append("(no output)")
-        
+
     return "\n".join(log_parts)
 
-import requests
 
 def create_paste(
     developer_key: str,
