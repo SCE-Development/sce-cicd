@@ -49,7 +49,9 @@ class MetricsHandler:
             )
 
     @classmethod
-    def push(cls, pushgateway_url: str) -> None:
+    def push(cls, pushgateway_url: str | None) -> None:
+        if pushgateway_url is None:
+            return
         prometheus_client.push_to_gateway(
             pushgateway_url,
             job="sce-cicd",
