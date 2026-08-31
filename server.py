@@ -58,6 +58,7 @@ SMEE2_API_KEY = None
 CICD_DISCORD_WEBHOOK_URL = None
 GITHUB_TOKEN = None
 PASTEBIN_API_KEY = None
+PUSHGATEWAY_URL = None
 
 
 @dataclasses.dataclass
@@ -293,6 +294,7 @@ def get_docker_images_disk_usage_bytes():
             multiplier = UNIT_MAP.get(unit.upper(), 1)
             usage = int(float(number) * multiplier)
             MetricsHandler.docker_image_disk_usage_bytes.set(usage)
+            MetricsHandler.push(PUSHGATEWAY_URL)
 
         return None
     except Exception:
@@ -301,6 +303,7 @@ def get_docker_images_disk_usage_bytes():
 
 def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
     MetricsHandler.last_push_timestamp.labels(repo=repo_cfg.name).set(time.time())
+    MetricsHandler.push(PUSHGATEWAY_URL)
 
     commit = payload.get("head_commit") or {}
     status = DeploymentStatus(
@@ -484,6 +487,7 @@ try:
         CICD_DISCORD_WEBHOOK_URL = data.get("cicd_discord_webhook_url")
         GITHUB_TOKEN = data.get("github_token")
         PASTEBIN_API_KEY = data.get("cleezy_token")
+        PUSHGATEWAY_URL = data.get("pushgateway_url")
         for r in raw_repos:
             # make a new entry into the result dictionary
             # the key is a tuple of the repo name and branch
@@ -676,6 +680,7 @@ def smee_listen():
         while True:
             message = ws.recv()
             MetricsHandler.last_smee_request_timestamp.set(time.time())
+            MetricsHandler.push(PUSHGATEWAY_URL)
 
             data = json.loads(message)
             # we used to get it like

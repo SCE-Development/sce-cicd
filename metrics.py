@@ -35,11 +35,25 @@ class Metrics(enum.Enum):
 class MetricsHandler:
     @classmethod
     def init(cls) -> None:
+        cls.registry = prometheus_client.CollectorRegistry()
         for metric in Metrics:
             setattr(
                 cls,
                 metric.title,
                 metric.prometheus_type(
-                    metric.title, metric.description, labelnames=metric.labels
+                    metric.title,
+                    metric.description,
+                    labelnames=metric.labels,
+                    registry=cls.registry,
                 ),
             )
+
+    @classmethod
+    def push(cls, pushgateway_url: str | None) -> None:
+        if pushgateway_url is None:
+            return
+        prometheus_client.push_to_gateway(
+            pushgateway_url,
+            job="sce-cicd",
+            registry=cls.registry,
+        )

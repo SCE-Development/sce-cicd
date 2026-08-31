@@ -19,6 +19,11 @@ cicd_discord_webhook_url: https://discord.com/api/webhooks/REST_OF_VALUE_HERE
 # for generating a token, see
 # https://docs.github.com/en/rest/commits/statuses?apiVersion=2026-03-10#get-the-combined-status-for-a-specific-reference--fine-grained-access-tokens
 github_token: github token goes here, make sure has access to read commit statuses
+# only use this field if you are trying to push stuff to prometheus
+# if on the poweredge:
+# pushgateway_url: http://one.sce/push
+# if running locally
+# pushgateway_url: http://localhost:9091
 
 repos:
   - name: git-workshop
