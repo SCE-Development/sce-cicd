@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import enum
 import fnmatch
 import getpass
 import json
@@ -94,6 +95,12 @@ class DeploymentStatus:
     docker_execution_result: Optional[ExecutionResult] = None
     docker_force_execution_result: Optional[ExecutionResult] = None
     is_dev: bool = False
+
+
+class Smee2ListenResult(enum.Enum):
+    NOTHING = 1
+    SOCKET_CLOSED = 2
+    SOCKET_COULDNT_CONNECT = 3
 
 
 REQUIRED_REPO_FIELDS = {
@@ -665,16 +672,15 @@ def health():
 
 
 def smee_listen():
-    url = SMEE2_URL
-    if not url:
+    if not SMEE2_URL:
         logger.info(f'not listening to any github traffic because smee2_url is empty in {args.config}')
-        return
-    api_key = SMEE2_API_KEY
+        return Smee2ListenResult.SOCKET_COULDNT_CONNECT
     
+    result = Smee2ListenResult.NOTHING
     try:
         # 1. Establish a synchronous connection
-        ws = websocket.create_connection(url, header={"X-API-Key": api_key})
-        logger.info(f"Connected to smee at {url}")
+        ws = websocket.create_connection(SMEE2_URL, header={"X-API-Key": SMEE2_API_KEY})
+        logger.info(f"Connected to smee at {SMEE2_URL}")
         
         # 2. Replace 'async for' with a blocking while loop
         while True:
@@ -712,17 +718,25 @@ def smee_listen():
                 
     except websocket.WebSocketConnectionClosedException:
         logger.warning("Smee WebSocket connection closed by the server.")
+        result = Smee2ListenResult.SOCKET_CLOSED
     except Exception as e:
         logger.exception(f"could not connect to smee2 url {SMEE2_URL}")
+        result = Smee2ListenResult.SOCKET_COULDNT_CONNECT
     finally:
         if 'ws' in locals():
             ws.close()
+    return result
 
 
 if __name__ == "server":
     MetricsHandler.init()
     get_docker_images_disk_usage_bytes()
-    smee_listen()
+    while True:
+        result = smee_listen()
+        if result == Smee2ListenResult.SOCKET_COULDNT_CONNECT:
+            break
+        logger.warning('attempting to connect to socket again')
+        time.sleep(5)
 
 
 if __name__ == "__main__":
