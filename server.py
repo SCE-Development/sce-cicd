@@ -495,6 +495,11 @@ try:
         GITHUB_TOKEN = data.get("github_token")
         PASTEBIN_API_KEY = data.get("cleezy_token")
         PUSHGATEWAY_URL = data.get("pushgateway_url")
+        # optional label so multiple sce-cicd instances don't overwrite each
+        # other's metrics in the pushgateway; falls back to the old default
+        prometheus_job_id = data.get("prometheus_job_id")
+        if prometheus_job_id:
+            MetricsHandler.job = prometheus_job_id
         for r in raw_repos:
             # make a new entry into the result dictionary
             # the key is a tuple of the repo name and branch
@@ -681,7 +686,9 @@ def smee_listen():
         # 1. Establish a synchronous connection
         ws = websocket.create_connection(SMEE2_URL, header={"X-API-Key": SMEE2_API_KEY})
         logger.info(f"Connected to smee at {SMEE2_URL}")
-        
+        MetricsHandler.websocket_connected.set(1)
+        MetricsHandler.push(PUSHGATEWAY_URL)
+
         # 2. Replace 'async for' with a blocking while loop
         while True:
             message = ws.recv()
@@ -723,6 +730,8 @@ def smee_listen():
         logger.exception(f"could not connect to smee2 url {SMEE2_URL}")
         result = Smee2ListenResult.SOCKET_COULDNT_CONNECT
     finally:
+        MetricsHandler.websocket_connected.set(0)
+        MetricsHandler.push(PUSHGATEWAY_URL)
         if 'ws' in locals():
             ws.close()
     return result
