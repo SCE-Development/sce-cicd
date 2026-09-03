@@ -21,6 +21,11 @@ class Metrics(enum.Enum):
         "Total disk usage of all Docker images in bytes",
         prometheus_client.Gauge,
     )
+    WEBSOCKET_CONNECTED = (
+        "websocket_connected",
+        "1 if connected to the smee websocket, 0 if not",
+        prometheus_client.Gauge,
+    )
 
     def __init__(self, title, description, prometheus_type, labels=()):
         # we use the above default value for labels because it matches what's used

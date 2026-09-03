@@ -681,7 +681,9 @@ def smee_listen():
         # 1. Establish a synchronous connection
         ws = websocket.create_connection(SMEE2_URL, header={"X-API-Key": SMEE2_API_KEY})
         logger.info(f"Connected to smee at {SMEE2_URL}")
-        
+        MetricsHandler.websocket_connected.set(1)
+        MetricsHandler.push(PUSHGATEWAY_URL)
+
         # 2. Replace 'async for' with a blocking while loop
         while True:
             message = ws.recv()
@@ -723,6 +725,8 @@ def smee_listen():
         logger.exception(f"could not connect to smee2 url {SMEE2_URL}")
         result = Smee2ListenResult.SOCKET_COULDNT_CONNECT
     finally:
+        MetricsHandler.websocket_connected.set(0)
+        MetricsHandler.push(PUSHGATEWAY_URL)
         if 'ws' in locals():
             ws.close()
     return result
