@@ -495,6 +495,11 @@ try:
         GITHUB_TOKEN = data.get("github_token")
         PASTEBIN_API_KEY = data.get("cleezy_token")
         PUSHGATEWAY_URL = data.get("pushgateway_url")
+        # optional label so multiple sce-cicd instances don't overwrite each
+        # other's metrics in the pushgateway; falls back to the old default
+        prometheus_job_id = data.get("prometheus_job_id")
+        if prometheus_job_id:
+            MetricsHandler.job = prometheus_job_id
         for r in raw_repos:
             # make a new entry into the result dictionary
             # the key is a tuple of the repo name and branch
