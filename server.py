@@ -1,14 +1,11 @@
 import dataclasses
 import datetime
-import enum
 import fnmatch
-import getpass
 import json
 import logging
 import os
 import queue
 import re
-import socket
 import subprocess
 import threading
 import time
@@ -17,7 +14,6 @@ from typing import Dict, List, Optional, Tuple
 from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import generate_latest
-import requests
 import uvicorn
 import websocket
 import yaml
@@ -25,7 +21,18 @@ import yaml
 from metrics import MetricsHandler
 from modules.args import get_args
 from modules.commit_status_helpers import CommitStatus, push_commit_status
+from modules.embeds import (
+    push_skipped_update_as_discord_embed_docker_ignore,
+    push_skipped_update_as_discord_embed_mismatched_branch,
+    send_notification,
+)
 from modules.pastebin_helpers import build_execution_log, create_paste
+from modules.structs import (
+    DeploymentStatus,
+    ExecutionResult,
+    RepoConfig,
+    Smee2ListenResult,
+)
 
 
 args = get_args()
@@ -60,47 +67,6 @@ CICD_DISCORD_WEBHOOK_URL = None
 GITHUB_TOKEN = None
 PASTEBIN_API_KEY = None
 PUSHGATEWAY_URL = None
-
-
-@dataclasses.dataclass
-class RepoConfig:
-    name: str
-    branch: str
-    path: str
-    # list of all the containers
-    # makes sure theres a new list made for each repotowatch object
-    containers_to_force_recreate: List[str] = dataclasses.field(default_factory=list)
-    docker_ignore: List[str] = dataclasses.field(default_factory=list)
-    actions_need_to_pass: bool = False
-    enable_rollback: bool = False
-
-
-@dataclasses.dataclass
-class ExecutionResult:
-    command: str
-    exit_code: int = 1
-    stdout: str = ""
-    stderr: str = ""
-    success: bool = False
-
-
-@dataclasses.dataclass
-class DeploymentStatus:
-    repo: str
-    branch: str
-    commit_id: str = "commit_id not set"
-    commit_msg: str = "commit_msg not set"
-    author: str = "author not set"
-    git_execution_result: Optional[ExecutionResult] = None
-    docker_execution_result: Optional[ExecutionResult] = None
-    docker_force_execution_result: Optional[ExecutionResult] = None
-    is_dev: bool = False
-
-
-class Smee2ListenResult(enum.Enum):
-    NOTHING = 1
-    SOCKET_CLOSED = 2
-    SOCKET_COULDNT_CONNECT = 3
 
 
 REQUIRED_REPO_FIELDS = {
@@ -220,56 +186,6 @@ def push_github_commit_status(status: DeploymentStatus):
             logger.exception("Failed to push GitHub commit status")
 
 
-def send_notification(status: DeploymentStatus):
-    webhook_url = CICD_DISCORD_WEBHOOK_URL
-    if not webhook_url:
-        logger.warning("Discord webhook URL missing from environment")
-        return
-
-    # Default to failure/neutral
-    color = 0xED4245
-    title = "Deployment Failed"
-
-    if status.is_dev:
-        color = 0x99AAB5
-        title = "[Development Mode]"
-    elif not status.git_execution_result or status.git_execution_result.success:
-        color = 0x57F287
-        title = "Deployment Successful"
-
-    env_str = f"{getpass.getuser()}@{socket.gethostname()}"
-
-    commit_id_to_use = status.commit_id
-
-    # assume it's an actual commit so we truncate it to the first 7
-    if " " not in status.commit_id and status.commit_id is not None:
-        commit_id_to_use = status.commit_id[:7]
-
-    description = (
-        f"**Repo:** `{status.repo}:{status.branch}`\n"
-        f"**Commit:** `{commit_id_to_use}` — {status.commit_msg}\n"
-        f"**Author:** {status.author} | **Host:** `{env_str}`\n"
-    )
-
-    for execution_result in [
-        status.git_execution_result,
-        status.docker_execution_result,
-        status.docker_force_execution_result,
-    ]:
-        if not execution_result:
-            continue
-        icon = "✅" if execution_result.success else "⚠️"
-        description += f"\n{icon} `{execution_result.command}` (Exit: {execution_result.exit_code})"
-        if execution_result.stderr:
-            description += f"\n```stderr\n{execution_result.stderr}```"
-
-    payload = {"embeds": [{"title": title, "description": description, "color": color}]}
-    try:
-        requests.post(webhook_url, json=payload, timeout=10).raise_for_status()
-    except Exception:
-        logger.exception("Failed to send Discord notification")
-
-
 def get_docker_images_disk_usage_bytes():
     # Docker uses SI units: 1000^n
     UNIT_MAP = {
@@ -335,7 +251,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
     if not status.git_execution_result.success:
         logger.error(f"Git pull failed for {repo_cfg.name}:{repo_cfg.branch}")
         push_github_commit_status(status)
-        send_notification(status)
+        send_notification(status, CICD_DISCORD_WEBHOOK_URL)
         return
 
     # Docker Compose
@@ -352,7 +268,7 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
                 status.commit_msg += " [ROLLED BACK DUE TO DOCKER FAILURE]"
         
         push_github_commit_status(status)
-        send_notification(status)
+        send_notification(status, CICD_DISCORD_WEBHOOK_URL)
         return
 
     if repo_cfg.containers_to_force_recreate:
@@ -365,92 +281,8 @@ def handle_deploy(repo_cfg: RepoConfig, payload: dict, is_dev: bool):
 
     logger.error(f"deployment complete for {repo_cfg.name}:{repo_cfg.branch}")
     push_github_commit_status(status)
-    send_notification(status)
+    send_notification(status, CICD_DISCORD_WEBHOOK_URL)
     get_docker_images_disk_usage_bytes()
-
-
-def push_skipped_update_as_discord_embed_mismatched_branch(
-    repo_config: RepoConfig, incoming_branch: str, local_branch: str
-):
-    repo_name = repo_config.name
-    # Yellow warning color
-    color = 0xFFFF00 
-    
-    # Get user@hostname
-    env_str = f"{getpass.getuser()}@{socket.gethostname()}"
-
-    description = (
-        f"**Incoming Push:** `{incoming_branch}`\n"
-        f"**Local Branch:** `{local_branch}`\n"
-        f"**Path:** `{repo_config.path}`\n"
-        f"**Host:** `{env_str}`"
-    )
-
-    embed_json = {
-        "embeds": [
-            {
-                "title": "Branch Mismatch: Deployment Skipped",
-                "url": f"https://github.com/SCE-Development/{repo_name}",
-                "description": description,
-                "color": color,
-                "footer": {
-                    "text": "The local branch must match the pushed branch to trigger CI/CD."
-                }
-            }
-        ]
-    }
-    
-    try:
-        response = requests.post(
-            CICD_DISCORD_WEBHOOK_URL,
-            json=embed_json,
-            timeout=10
-        )
-        response.raise_for_status()
-        logger.info(f"Mismatch notification sent for {repo_name}")
-    except Exception:
-        logger.exception("Failed to send mismatch notification to Discord")
-
-
-def push_skipped_update_as_discord_embed_docker_ignore(repo_cfg: RepoConfig, files_changed: List[str]):
-    webhook_url = CICD_DISCORD_WEBHOOK_URL
-    if not webhook_url:
-        logger.info("skipping docker embed, cicd_discord_webhook_url is empty")
-        return
-
-    # A neutral Blue/Grey color for "Informational"
-    color = 0x3498db 
-    title = "Deployment Skipped (Ignored Files)"
-    
-    # Truncate file list if it's too long for Discord
-    files_display = "\n".join(files_changed[:10])
-    if len(files_changed) > 10:
-        files_display += f"\n*...and {len(files_changed) - 10} more*"
-
-    patterns_display = ", ".join([f"`{p}`" for p in repo_cfg.docker_ignore])
-    env_str = f"{getpass.getuser()}@{socket.gethostname()}"
-
-    description = (
-        f"**Repo:** `{repo_cfg.name}:{repo_cfg.branch}`\n"
-        f"**Status:** No deployment triggered because all changed files match the `docker_ignore` patterns.\n\n"
-        f"**Matched Patterns:** {patterns_display}\n"
-        f"**Files Changed:**\n```\n{files_display}\n```\n"
-        f"**Host:** `{env_str}`"
-    )
-
-    payload = {
-        "embeds": [{
-            "title": title, 
-            "description": description, 
-            "color": color,
-            "footer": {"text": "CICD Engine • Filtered by docker_ignore"}
-        }]
-    }
-
-    try:
-        requests.post(webhook_url, json=payload, timeout=10)
-    except Exception:
-        logger.exception("Failed to send skip notification")
 
 
 def should_skip_deployment(files_changed: List[str], ignore_patterns: List[str]) -> bool:
@@ -612,7 +444,7 @@ def handle_push_event(data: dict, target: RepoConfig):
 
         if current_branch != branch:
             logger.warning(f"Branch mismatch for {repo_name}")
-            push_skipped_update_as_discord_embed_mismatched_branch(target, branch, current_branch)
+            push_skipped_update_as_discord_embed_mismatched_branch(target, branch, current_branch, CICD_DISCORD_WEBHOOK_URL)
             return {"status": "skipped", "reason": "branch mismatch"}
 
     head_commit = data.get("head_commit") or {}
@@ -624,7 +456,7 @@ def handle_push_event(data: dict, target: RepoConfig):
 
     if should_skip_deployment(files_changed, target.docker_ignore):
         logger.info(f"Skipping deployment for {repo_name}: All files match docker_ignore.")
-        push_skipped_update_as_discord_embed_docker_ignore(target, files_changed)
+        push_skipped_update_as_discord_embed_docker_ignore(target, files_changed, CICD_DISCORD_WEBHOOK_URL)
         return {"status": "skipped", "reason": "all changed files ignored"}
 
     logger.info(f"Accepted push for {repo_name}:{branch}")
