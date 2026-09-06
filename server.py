@@ -493,6 +493,9 @@ try:
         GITHUB_TOKEN = data.get("github_token")
         PASTEBIN_API_KEY = data.get("cleezy_token")
         PUSHGATEWAY_URL = data.get("pushgateway_url")
+        PROMETHEUS_JOB_ID = data.get("prometheus_job_id")
+        if PROMETHEUS_JOB_ID:
+            MetricsHandler.job_id = PROMETHEUS_JOB_ID
         for r in raw_repos:
             # make a new entry into the result dictionary
             # the key is a tuple of the repo name and branch

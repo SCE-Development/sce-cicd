@@ -24,6 +24,8 @@ github_token: github token goes here, make sure has access to read commit status
 # pushgateway_url: http://one.sce/push
 # if running locally
 # pushgateway_url: http://localhost:9091
+# use this field if you want a custom job id when pushing to pushgateway
+# prometheus_job_id: sce-cicd
 
 repos:
   - name: git-workshop

@@ -38,6 +38,9 @@ class Metrics(enum.Enum):
 
 
 class MetricsHandler:
+
+    job_id = "sce-cicd"
+
     @classmethod
     def init(cls) -> None:
         cls.registry = prometheus_client.CollectorRegistry()
@@ -59,6 +62,6 @@ class MetricsHandler:
             return
         prometheus_client.push_to_gateway(
             pushgateway_url,
-            job="sce-cicd",
+            job=cls.job_id,
             registry=cls.registry,
         )
