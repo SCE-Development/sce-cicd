@@ -671,12 +671,28 @@ def get_metrics():
 def health():
     return {"status": "ok", "dev_mode": args.development}
 
+def start_metrics_pusher(interval_seconds=15):
+    """Background thread worker to periodically push metrics."""
+    if PUSHGATEWAY_URL is None:
+        logger.warning("not pushing metrics, PUSHGATEWAY_URL is not set")
+        return
+    def push_loop():
+        while True:
+            time.sleep(interval_seconds)
+            try:
+                MetricsHandler.push(PUSHGATEWAY_URL)
+            except Exception:
+                logger.exception("Failed to push metrics to Pushgateway")
+
+    thread = threading.Thread(target=push_loop, daemon=True)
+    thread.start()
+    return thread
 
 def smee_listen():
     if not SMEE2_URL:
         logger.info(f'not listening to any github traffic because smee2_url is empty in {args.config}')
         return Smee2ListenResult.SOCKET_COULDNT_CONNECT
-    
+
     result = Smee2ListenResult.NOTHING
     try:
         # 1. Establish a synchronous connection
@@ -717,10 +733,11 @@ def smee_listen():
             elif event == "workflow_run":
                 handle_workflow_run_event(data, target)
                 
-    except websocket.WebSocketConnectionClosedException:
+    except websocket.WebSocketConnectionClosedException | OSError:
+        # OSError gets raised for stuff like "OSError: [Errno 101] Network is unreachable"
         logger.warning("Smee WebSocket connection closed by the server.")
         result = Smee2ListenResult.SOCKET_CLOSED
-    except Exception as e:
+    except Exception:
         logger.exception(f"could not connect to smee2 url {SMEE2_URL}")
         result = Smee2ListenResult.SOCKET_COULDNT_CONNECT
     finally:
@@ -733,6 +750,7 @@ def smee_listen():
 if __name__ == "server":
     MetricsHandler.init()
     get_docker_images_disk_usage_bytes()
+    start_metrics_pusher()
     while True:
         result = smee_listen()
         if result == Smee2ListenResult.SOCKET_COULDNT_CONNECT:
