@@ -28,4 +28,10 @@ def get_args():
     default="http://127.0.0.1:9091",
     help="URL of the Prometheus Pushgateway",
     )
+    parser.add_argument(
+        "--restart-on-push",
+        default=None,
+        metavar="BRANCH",
+        help="watch sce-cicd's own <branch>; exit with code 10 on a matching push so a wrapper can self-update",
+    )
     return parser.parse_args()

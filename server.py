@@ -10,6 +10,7 @@ import queue
 import re
 import socket
 import subprocess
+import sys
 import threading
 import time
 from typing import Dict, List, Optional, Tuple
@@ -268,6 +269,31 @@ def send_notification(status: DeploymentStatus):
         requests.post(webhook_url, json=payload, timeout=10).raise_for_status()
     except Exception:
         logger.exception("Failed to send Discord notification")
+
+
+def push_restart_result_as_discord_embed(commit_hash: str, commit_title: str, success: bool):
+    webhook_url = CICD_DISCORD_WEBHOOK_URL
+    if not webhook_url:
+        logger.info("skipping restart embed, cicd_discord_webhook_url is empty")
+        return
+
+    env_str = f"{getpass.getuser()}@{socket.gethostname()}"
+    color = 0x57F287 if success else 0xED4245
+    title = "CICD Restarted" if success else "CICD Restart Failed"
+
+    commit_url = f"https://github.com/SCE-Development/sce-cicd/commit/{commit_hash}"
+    short_hash = commit_hash[:7] if commit_hash else "unknown"
+
+    description = (
+        f"**Host:** `{env_str}`\n"
+        f"**Commit:** [`{short_hash}`]({commit_url}) — {commit_title}\n"
+    )
+
+    payload = {"embeds": [{"title": title, "description": description, "color": color}]}
+    try:
+        requests.post(webhook_url, json=payload, timeout=10)
+    except Exception:
+        logger.exception("Failed to send restart notification")
 
 
 def get_docker_images_disk_usage_bytes():
@@ -722,6 +748,16 @@ def smee_listen():
                 branch = data.get("workflow_run", {}).get("head_branch")
                 event = "workflow_run"
 
+            if (
+                args.restart_on_push
+                and event == "push"
+                and repo_name == "sce-cicd"
+                and branch == args.restart_on_push
+            ):
+                logger.warning("self-update push detected; exiting with code 10")
+                ws.close()
+                sys.exit(10)
+
             target = REPO_MAP.get((repo_name, branch))
 
             if not target:
@@ -747,10 +783,39 @@ def smee_listen():
     return result
 
 
+def get_current_commit() -> Tuple[str, str]:
+    """Returns (hash, title) of the most recent commit in this repo."""
+    def _git(pretty: str) -> str:
+        try:
+            return subprocess.run(
+                ["git", "log", "-1", f"--pretty={pretty}"],
+                capture_output=True, text=True,
+            ).stdout.strip()
+        except Exception:
+            logger.exception("failed to read current commit")
+            return ""
+    return _git("%H"), _git("%s")
+
+
+def notify_restart(success: bool):
+    if os.environ.get("SCE_CICD_RESTARTED") != "1":
+        return
+    commit_hash, commit_title = get_current_commit()
+    push_restart_result_as_discord_embed(commit_hash, commit_title, success=success)
+
+
 if __name__ == "server":
-    MetricsHandler.init()
-    get_docker_images_disk_usage_bytes()
-    start_metrics_pusher()
+    try:
+        MetricsHandler.init()
+        get_docker_images_disk_usage_bytes()
+        start_metrics_pusher()
+    except Exception:
+        logger.exception("startup failed")
+        notify_restart(success=False)
+        sys.exit(1)
+
+    notify_restart(success=True)
+
     while True:
         result = smee_listen()
         if result == Smee2ListenResult.SOCKET_COULDNT_CONNECT:
